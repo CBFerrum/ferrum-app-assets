@@ -1,0 +1,134 @@
+- name: Location
+  label: Location
+  kind: master
+  module: assets
+  title_field: location_name
+  description: Where assets are, as a tree (site → building → room). Groups hold other locations, not assets.
+  fields:
+    - {name: location_name, type: data, required: true, unique: true, in_list: true}
+    - {name: parent_location, type: link, to: Location, link_filters: {is_group: true}, in_list: true, in_filter: true}
+    - {name: is_group, type: check, in_list: true, in_filter: true}
+    - {name: address, type: text}
+  list: {columns: [location_name, parent_location, is_group], sort: location_name asc}
+
+- name: FinanceBook
+  label: Finance Book
+  kind: master
+  module: assets
+  title_field: finance_book_name
+  description: A label for the books an asset is kept in (e.g. Tax Book); reports filter by it.
+  fields:
+    - {name: finance_book_name, type: data, required: true, unique: true, in_list: true}
+
+- name: AssetCategoryAccount
+  label: Asset Category Account
+  kind: child
+  fields:
+    - {name: company, type: link, to: Company, required: true, in_list: true}
+    - {name: fixed_asset_account, type: link, to: Account, required: true, link_filters: {is_group: false, root_type: Asset}, in_list: true}
+    - {name: accumulated_depreciation_account, type: link, to: Account, link_filters: {is_group: false, root_type: Asset}, in_list: true, description: Empty = the company default}
+    - {name: depreciation_expense_account, type: link, to: Account, link_filters: {is_group: false, root_type: Expense}, in_list: true, description: Empty = the company default}
+    - {name: capital_work_in_progress_account, type: link, to: Account, link_filters: {is_group: false, root_type: Asset}, label: Capital Work in Progress Account, description: Empty = the company default}
+    - {name: disposal_account, type: link, to: Account, link_filters: {is_group: false}, label: Gain/Loss on Disposal Account, description: Empty = the company default}
+
+- name: AssetCategory
+  label: Asset Category
+  label_plural: Asset Categories
+  kind: master
+  module: assets
+  title_field: category_name
+  description: Depreciation defaults and accounts shared by similar assets.
+  fields:
+    - {name: category_name, type: data, required: true, unique: true, in_list: true}
+    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Manual], required: true, default: Straight Line, in_list: true, in_filter: true}
+    - {name: total_number_of_depreciations, type: int, required: true, min: 1, max: 1200, in_list: true, description: Useful life in depreciation periods}
+    - {name: frequency_of_depreciation, type: int, required: true, min: 1, max: 120, default: 12, label: Frequency of Depreciation (Months), in_list: true}
+    - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year), visible_if: "doc.depreciation_method == 'Written Down Value'", required_if: "doc.depreciation_method == 'Written Down Value'"}
+    - name: start_convention
+      type: select
+      options: [Pro-rata by Days, Full First Period]
+      required: true
+      default: Pro-rata by Days
+      label: Depreciation Start Convention
+      description: "Pro-rata by Days: the first period is depreciated for the days from the available-for-use date, and the remainder in one extra period at the end. Full First Period: the first period counts in full."
+    - {name: enable_cwip_accounting, type: check, label: Enable Capital Work in Progress Accounting, description: Purchases are booked to the CWIP account and move to the fixed asset account when the asset is submitted}
+    - {name: group_assets, type: check, label: One Asset per Purchase Line, description: "A purchase invoice line of 10 units makes one asset of quantity 10 instead of ten assets"}
+    - {name: accounts, type: table, of: AssetCategoryAccount, label: Accounts per Company}
+  rules:
+    - {name: wdv_rate, check: "doc.depreciation_method != 'Written Down Value' || doc.rate_of_depreciation > 0.0", message: "Written down value needs a rate of depreciation"}
+  list: {columns: [category_name, depreciation_method, total_number_of_depreciations, frequency_of_depreciation], sort: category_name asc}
+
+- name: AssetDepreciationSchedule
+  label: Depreciation Schedule
+  kind: child
+  fields:
+    - {name: schedule_date, type: date, required: true, in_list: true}
+    - {name: depreciation_amount, type: currency, required: true, min: "0", in_list: true}
+    - {name: accumulated_depreciation, type: currency, read_only: true, in_list: true, description: Including opening accumulated depreciation}
+    - {name: booked, type: check, read_only: true, no_copy: true, in_list: true}
+    - {name: journal_entry, type: link, to: JournalEntry, read_only: true, no_copy: true, in_list: true}
+    - {name: disposal, type: link, to: AssetDisposal, read_only: true, no_copy: true, description: The disposal that booked this pro-rata depreciation}
+    - {name: posting_error, type: text, read_only: true, no_copy: true, description: Why the last attempt to book this row failed}
+
+- name: Asset
+  label: Asset
+  kind: document
+  module: assets
+  submittable: true
+  company_scoped: true
+  title_field: asset_name
+  numbering: {template: "AST-{YYYY}-{seq:5}", date_field: purchase_date}
+  search_fields: [asset_name, custodian]
+  owner_fields: [custodian]
+  fields:
+    - {name: asset_name, type: data, required: true, in_list: true, description: Defaults to the item name}
+    - {name: item, type: link, to: Item, required: true, in_filter: true, description: A fixed asset item (not a stock item)}
+    - {name: asset_category, type: link, to: AssetCategory, required: true, in_list: true, in_filter: true, description: Defaults to the item's category}
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true}
+    - {name: currency, type: link, to: Currency, fetch_from: company.default_currency, read_only: true}
+    - {name: location, type: link, to: Location, required: true, link_filters: {is_group: false}, in_list: true, in_filter: true, description: Changed by asset movements once submitted}
+    - {name: custodian, type: email, in_list: true, in_filter: true, description: Email of the user responsible for it; they see the asset. Changed by asset movements once submitted}
+    - {name: cost_center, type: link, to: CostCenter, link_filters: {is_group: false}, description: Depreciation is booked to it (default the company's depreciation cost center)}
+    - {name: finance_book, type: link, to: FinanceBook, in_filter: true}
+    - {name: asset_quantity, type: int, required: true, default: 1, min: 1}
+    - {name: purchase_date, type: date, required: true, in_filter: true}
+    - {name: available_for_use_date, type: date, required: true, description: Depreciation starts here (default the purchase date)}
+    - {name: gross_purchase_amount, type: currency, currency: currency, required: true, min: "0"}
+    - {name: is_existing_asset, type: check, in_filter: true, description: "Its cost is already in the books (opening balance or a journal entry). Other assets come from a purchase invoice"}
+    - {name: purchase_invoice, type: link, to: PurchaseInvoice, read_only: true, in_filter: true}
+    - {name: purchase_invoice_item, type: data, read_only: true, hidden: true}
+    - {name: opening_accumulated_depreciation, type: currency, currency: currency, min: "0", visible_if: "doc.is_existing_asset", description: Depreciation booked before this asset was registered}
+    - {name: opening_number_of_booked_depreciations, type: int, min: 0, default: 0, visible_if: "doc.is_existing_asset", description: Depreciation periods already behind it}
+    - {name: calculate_depreciation, type: check, default: true, description: Off for assets that do not depreciate (land)}
+    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Manual], visible_if: "doc.calculate_depreciation", description: Defaults to the category's}
+    - {name: total_number_of_depreciations, type: int, min: 1, max: 1200, visible_if: "doc.calculate_depreciation"}
+    - {name: frequency_of_depreciation, type: int, min: 1, max: 120, label: Frequency of Depreciation (Months), visible_if: "doc.calculate_depreciation"}
+    - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year), visible_if: "doc.calculate_depreciation && doc.depreciation_method == 'Written Down Value'"}
+    - {name: start_convention, type: select, options: [Pro-rata by Days, Full First Period], label: Depreciation Start Convention, visible_if: "doc.calculate_depreciation"}
+    - {name: depreciation_start_date, type: date, visible_if: "doc.calculate_depreciation", description: "First depreciation date; default the end of the first period (for existing assets: the next depreciation date)"}
+    - {name: salvage_value, type: currency, currency: currency, min: "0", default: 0, label: Salvage Value, description: Value expected at the end of its useful life; never depreciated}
+    - {name: schedule, type: table, of: AssetDepreciationSchedule, label: Depreciation Schedule, description: "Generated from the settings, except for the Manual method where you enter it"}
+    - {name: fixed_asset_account, type: link, to: Account, read_only: true, no_copy: true}
+    - {name: accumulated_depreciation_account, type: link, to: Account, read_only: true, no_copy: true}
+    - {name: depreciation_expense_account, type: link, to: Account, read_only: true, no_copy: true}
+    - {name: additional_asset_cost, type: currency, currency: currency, read_only: true, no_copy: true, label: Capitalized Repairs}
+    - {name: value_adjustments, type: currency, currency: currency, read_only: true, no_copy: true}
+    - {name: total_asset_cost, type: currency, currency: currency, read_only: true, no_copy: true, description: Purchase amount + capitalized repairs + value adjustments}
+    - {name: accumulated_depreciation, type: currency, currency: currency, read_only: true, no_copy: true}
+    - {name: value_after_depreciation, type: currency, currency: currency, read_only: true, no_copy: true, in_list: true, label: Net Book Value}
+    - {name: next_depreciation_date, type: date, read_only: true, no_copy: true}
+    - {name: status, type: select, options: [Draft, Submitted, Partially Depreciated, Fully Depreciated, In Maintenance, Out of Order, Sold, Scrapped, Cancelled], default: Draft, read_only: true, no_copy: true, in_list: true, in_filter: true}
+    - {name: disposal, type: link, to: AssetDisposal, read_only: true, no_copy: true}
+    - {name: disposal_date, type: date, read_only: true, no_copy: true}
+    - {name: description, type: text}
+  form:
+    - {label: Asset, fields: [asset_name, item, asset_category, company, currency, location, custodian, cost_center, finance_book, asset_quantity, status]}
+    - {label: Purchase, fields: [purchase_date, available_for_use_date, gross_purchase_amount, is_existing_asset, purchase_invoice, opening_accumulated_depreciation, opening_number_of_booked_depreciations]}
+    - {label: Depreciation, fields: [calculate_depreciation, depreciation_method, total_number_of_depreciations, frequency_of_depreciation, rate_of_depreciation, start_convention, depreciation_start_date, salvage_value, schedule]}
+    - {label: Values, fields: [total_asset_cost, additional_asset_cost, value_adjustments, accumulated_depreciation, value_after_depreciation, next_depreciation_date, disposal, disposal_date]}
+    - {label: Accounts, collapsible: true, fields: [fixed_asset_account, accumulated_depreciation_account, depreciation_expense_account]}
+    - {label: More, collapsible: true, fields: [description]}
+  rules:
+    - {name: positive_cost, check: "doc.gross_purchase_amount > 0.0", message: "Gross purchase amount must be greater than zero"}
+    - {name: available_after_purchase, check: "doc.available_for_use_date == null || doc.purchase_date == null || doc.available_for_use_date >= doc.purchase_date", message: "The available-for-use date cannot be before the purchase date"}
+  list: {columns: [number, asset_name, asset_category, location, value_after_depreciation, status], sort: created_at desc}

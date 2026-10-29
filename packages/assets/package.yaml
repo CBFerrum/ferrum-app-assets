@@ -1,0 +1,97 @@
+package: assets
+version: 0.1.0
+label: Assets
+description: Fixed assets - categories with per-company accounts, depreciation schedules posted to the ledger, movements and custody, value adjustments, repairs, maintenance plans, sale and scrapping, capitalization from purchase invoices.
+depends: [accounting, buying, selling]
+field_prefix: fa_
+
+overlays:
+  - entity: Account
+    ops:
+      - {op: add_options, field: account_type, options: [Capital Work in Progress, Accumulated Depreciation, Depreciation]}
+  - entity: Company
+    ops:
+      - {op: add_field, field: {name: fa_accumulated_depreciation_account, type: link, to: Account, label: Accumulated Depreciation Account, link_filters: {is_group: false}, description: Default for asset categories without one}}
+      - {op: add_field, field: {name: fa_depreciation_expense_account, type: link, to: Account, label: Depreciation Expense Account, link_filters: {is_group: false}}}
+      - {op: add_field, field: {name: fa_capital_work_in_progress_account, type: link, to: Account, label: Capital Work in Progress Account, link_filters: {is_group: false}}}
+      - {op: add_field, field: {name: fa_disposal_account, type: link, to: Account, label: Gain/Loss on Asset Disposal Account, link_filters: {is_group: false}}}
+      - {op: add_field, field: {name: fa_depreciation_cost_center, type: link, to: CostCenter, label: Depreciation Cost Center, link_filters: {is_group: false}, description: Default cost center of new assets}}
+      - {op: add_action, action: {name: setup_asset_accounts, label: Create Asset Accounts, permission: write, confirm: "Create the standard fixed asset accounts (CWIP, accumulated depreciation, depreciation, disposal gain/loss) for this company?"}}
+  - entity: Item
+    ops:
+      - {op: add_field, field: {name: fa_is_fixed_asset, type: check, label: Is Fixed Asset, in_filter: true, description: Bought and tracked as an asset; never a stock item}}
+      - {op: add_field, field: {name: fa_asset_category, type: link, to: AssetCategory, label: Asset Category, visible_if: "doc.fa_is_fixed_asset"}}
+  - entity: PurchaseInvoiceItem
+    ops:
+      - {op: add_field, field: {name: fa_is_fixed_asset, type: check, label: Is Fixed Asset, description: "Set from the item; the line is booked to the category's fixed asset (or CWIP) account and drafts assets on submit"}}
+      - {op: add_field, field: {name: fa_asset_category, type: link, to: AssetCategory, label: Asset Category, visible_if: "doc.fa_is_fixed_asset", required_if: "doc.fa_is_fixed_asset"}}
+      - {op: add_field, field: {name: fa_asset_location, type: link, to: Location, label: Asset Location, link_filters: {is_group: false}, visible_if: "doc.fa_is_fixed_asset", required_if: "doc.fa_is_fixed_asset"}}
+  - entity: SalesInvoiceItem
+    ops:
+      - {op: add_field, field: {name: fa_asset_disposal, type: link, to: AssetDisposal, label: Asset Disposal, read_only: true, description: "Sells the disposal's asset: the line is credited to its fixed asset account and the gain or loss is booked on submit"}}
+  - entity: JournalEntry
+    ops:
+      - {op: add_field, field: {name: fa_asset, type: link, to: Asset, label: Asset, read_only: true, in_filter: true, description: Asset whose depreciation this entry books}}
+
+modules:
+  - name: assets
+    label: Assets
+    icon: building
+    order: 55
+    items: [Asset, AssetMovement, AssetValueAdjustment, AssetRepair, AssetMaintenance, AssetMaintenanceLog, AssetDisposal, AssetCategory, Location,
+            FinanceBook, report:fixed_asset_register, report:asset_depreciation_schedule, report:asset_movement_history, report:asset_maintenance_due,
+            report:asset_disposal_gain_loss]
+
+roles:
+  - name: Asset Manager
+    description: Registers, depreciates, moves, revalues, repairs, maintains and disposes of assets.
+    permissions:
+      - {entity: Asset, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true, import: true}
+      - {entity: AssetCategory, read: true, write: true, create: true, delete: true, export: true, import: true}
+      - {entity: Location, read: true, write: true, create: true, delete: true, export: true, import: true}
+      - {entity: FinanceBook, read: true, write: true, create: true, delete: true}
+      - {entity: AssetMovement, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
+      - {entity: AssetValueAdjustment, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
+      - {entity: AssetRepair, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
+      - {entity: AssetMaintenance, read: true, write: true, create: true, delete: true, export: true}
+      - {entity: AssetMaintenanceLog, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
+      - {entity: AssetDisposal, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
+      - {entity: SalesInvoice, read: true, write: true, create: true, submit: true}
+      - {entity: JournalEntry, read: true}
+      - {entity: PurchaseInvoice, read: true}
+      - {entity: Item, read: true}
+      - {entity: ItemGroup, read: true}
+      - {entity: Uom, read: true}
+      - {entity: Customer, read: true}
+      - {entity: Supplier, read: true}
+      - {entity: Company, read: true}
+      - {entity: Currency, read: true}
+      - {entity: Account, read: true}
+      - {entity: CostCenter, read: true}
+      - {entity: PriceList, read: true}
+      - {entity: TaxTemplate, read: true}
+  - name: Asset User
+    description: Looks after the assets in their custody - sees them, records their repairs and maintenance work.
+    permissions:
+      - {entity: Asset, read: true, if_owner: true}
+      - {entity: AssetMovement, read: true, if_owner: true}
+      - {entity: AssetMaintenance, read: true, if_owner: true}
+      - {entity: AssetMaintenanceLog, read: true, write: true, create: true, submit: true, if_owner: true}
+      - {entity: AssetRepair, read: true, write: true, create: true, delete: true, if_owner: true}
+      - {entity: AssetCategory, read: true}
+      - {entity: Location, read: true}
+      - {entity: FinanceBook, read: true}
+      - {entity: Item, read: true}
+      - {entity: Company, read: true}
+  - name: Accounts Manager
+    permissions:
+      - {entity: Asset, read: true, export: true}
+      - {entity: AssetCategory, read: true}
+      - {entity: Location, read: true}
+      - {entity: FinanceBook, read: true}
+      - {entity: AssetMovement, read: true}
+      - {entity: AssetValueAdjustment, read: true, export: true}
+      - {entity: AssetRepair, read: true}
+      - {entity: AssetMaintenance, read: true}
+      - {entity: AssetMaintenanceLog, read: true}
+      - {entity: AssetDisposal, read: true, export: true}

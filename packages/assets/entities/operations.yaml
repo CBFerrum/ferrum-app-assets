@@ -1,0 +1,161 @@
+- name: AssetMovementItem
+  label: Asset Movement Item
+  kind: child
+  fields:
+    - {name: asset, type: link, to: Asset, required: true, in_list: true}
+    - {name: source_location, type: link, to: Location, read_only: true, in_list: true, description: Where the asset is (filled in)}
+    - {name: target_location, type: link, to: Location, link_filters: {is_group: false}, in_list: true, description: Empty = it stays where it is}
+    - {name: from_custodian, type: email, read_only: true, in_list: true}
+    - {name: to_custodian, type: email, in_list: true}
+
+- name: AssetMovement
+  label: Asset Movement
+  kind: document
+  module: assets
+  submittable: true
+  company_scoped: true
+  numbering: {template: "AMV-{FY}-{seq:5}", date_field: transaction_date}
+  owner_fields: [assets.to_custodian, assets.from_custodian]
+  description: "Transfer moves assets to another location; Issue hands them to a custodian; Receipt takes them back from their custodian into a location."
+  fields:
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true}
+    - {name: purpose, type: select, options: [Transfer, Issue, Receipt], required: true, default: Transfer, in_list: true, in_filter: true}
+    - {name: transaction_date, type: date, required: true, default_expr: today, in_list: true, in_filter: true}
+    - {name: assets, type: table, of: AssetMovementItem, required: true}
+    - {name: remarks, type: text}
+  list: {columns: [number, purpose, transaction_date], sort: transaction_date desc}
+
+- name: AssetValueAdjustment
+  label: Asset Value Adjustment
+  kind: document
+  module: assets
+  submittable: true
+  company_scoped: true
+  numbering: {template: "AVA-{FY}-{seq:5}", date_field: adjustment_date}
+  description: Revalues an asset (impairment or revaluation); the remaining depreciation is spread over the rest of its life.
+  fields:
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true}
+    - {name: asset, type: link, to: Asset, required: true, in_list: true, in_filter: true}
+    - {name: adjustment_date, type: date, required: true, default_expr: today, in_list: true}
+    - {name: finance_book, type: link, to: FinanceBook, read_only: true}
+    - {name: current_asset_value, type: currency, read_only: true, no_copy: true, in_list: true, description: "Net book value on the date, after the depreciation due by then (final on submit)"}
+    - {name: new_asset_value, type: currency, required: true, min: "0", in_list: true}
+    - {name: difference_amount, type: currency, read_only: true, no_copy: true, in_list: true}
+    - {name: difference_account, type: link, to: Account, required: true, link_filters: {is_group: false}, description: "The other side of the entry: an impairment loss for a decrease, a revaluation surplus for an increase"}
+    - {name: cost_center, type: link, to: CostCenter, link_filters: {is_group: false}}
+    - {name: remarks, type: text}
+  list: {columns: [number, asset, adjustment_date, current_asset_value, new_asset_value], sort: adjustment_date desc}
+
+- name: AssetRepair
+  label: Asset Repair
+  kind: document
+  module: assets
+  submittable: true
+  company_scoped: true
+  numbering: {template: "ARP-{FY}-{seq:5}", date_field: failure_date}
+  description: "A pending repair puts the asset out of order. Submit it completed (or cancelled); a capitalized cost moves from where it was booked into the asset's value."
+  fields:
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true}
+    - {name: asset, type: link, to: Asset, required: true, in_list: true, in_filter: true}
+    - {name: failure_date, type: date, required: true, default_expr: today, in_list: true}
+    - {name: repair_status, type: select, options: [Pending, Completed, Cancelled], required: true, default: Pending, in_list: true, in_filter: true}
+    - {name: completion_date, type: date, required_if: "doc.repair_status == 'Completed'"}
+    - {name: description, type: text, label: Error Description}
+    - {name: actions_performed, type: text}
+    - {name: repair_cost, type: currency, min: "0", default: 0, in_list: true}
+    - {name: capitalize_repair_cost, type: check, description: Add the cost to the asset's value and depreciate it over the rest of its life}
+    - {name: purchase_invoice, type: link, to: PurchaseInvoice, description: The invoice that billed the repair}
+    - {name: expense_account, type: link, to: Account, link_filters: {is_group: false}, required_if: "doc.capitalize_repair_cost", description: "Where the repair cost was booked (default: the purchase invoice's account); capitalizing credits it"}
+    - {name: cost_center, type: link, to: CostCenter, link_filters: {is_group: false}}
+  rules:
+    - {name: completion_after_failure, check: "doc.completion_date == null || doc.completion_date >= doc.failure_date", message: "The completion date cannot be before the failure date"}
+    - {name: capitalized_cost, check: "!doc.capitalize_repair_cost || doc.repair_cost > 0.0", message: "A capitalized repair needs a cost"}
+  list: {columns: [number, asset, failure_date, repair_status, repair_cost], sort: failure_date desc}
+
+- name: AssetMaintenanceTask
+  label: Asset Maintenance Task
+  kind: child
+  fields:
+    - {name: task_name, type: data, required: true, in_list: true}
+    - {name: maintenance_type, type: select, options: [Preventive Maintenance, Calibration, Inspection], default: Preventive Maintenance, in_list: true}
+    - {name: periodicity, type: select, options: [Daily, Weekly, Monthly, Quarterly, Half-yearly, Yearly, 2 Yearly, 3 Yearly], required: true, default: Monthly, in_list: true}
+    - {name: start_date, type: date, required: true, description: The first period counts from here}
+    - {name: end_date, type: date, description: No more due dates after it}
+    - {name: assign_to, type: email, in_list: true, description: Notified when the task is due; they see the plan and its logs}
+    - {name: last_completion_date, type: date, read_only: true, no_copy: true}
+    - {name: next_due_date, type: date, read_only: true, no_copy: true, in_list: true}
+    - {name: last_notified_date, type: date, read_only: true, no_copy: true, hidden: true}
+    - {name: description, type: text}
+  rules:
+    - {name: end_after_start, check: "doc.end_date == null || doc.end_date >= doc.start_date", message: "The end date cannot be before the start date"}
+
+- name: AssetMaintenance
+  label: Asset Maintenance
+  kind: master
+  module: assets
+  company_scoped: true
+  title_field: asset_name
+  owner_fields: [maintenance_manager, tasks.assign_to]
+  description: An asset's maintenance plan. Due tasks create a maintenance log and notify their assignee.
+  fields:
+    - {name: asset, type: link, to: Asset, required: true, unique: true, in_list: true}
+    - {name: asset_name, type: data, fetch_from: asset.asset_name, read_only: true, in_list: true}
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true, description: The asset's company}
+    - {name: maintenance_manager, type: email}
+    - {name: tasks, type: table, of: AssetMaintenanceTask, required: true}
+  list: {columns: [asset, asset_name, maintenance_manager], sort: created_at desc}
+
+- name: AssetMaintenanceLog
+  label: Asset Maintenance Log
+  kind: document
+  module: assets
+  submittable: true
+  company_scoped: true
+  numbering: {template: "AML-{FY}-{seq:5}", date_field: due_date}
+  owner_fields: [assigned_to]
+  description: One occurrence of a maintenance task. While in progress the asset is in maintenance; submit it completed (or cancelled).
+  fields:
+    - {name: asset_maintenance, type: link, to: AssetMaintenance, required: true, in_filter: true}
+    - {name: asset, type: link, to: Asset, read_only: true, in_list: true, in_filter: true}
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true, description: The asset's company}
+    - {name: task, type: data, required: true, description: Id of the maintenance task}
+    - {name: task_name, type: data, read_only: true, in_list: true}
+    - {name: maintenance_type, type: data, read_only: true}
+    - {name: periodicity, type: data, read_only: true}
+    - {name: due_date, type: date, in_list: true, description: Default the task's next due date}
+    - {name: maintenance_status, type: select, options: [Planned, In Progress, Completed, Cancelled], required: true, default: Planned, in_list: true, in_filter: true}
+    - {name: completion_date, type: date, required_if: "doc.maintenance_status == 'Completed'"}
+    - {name: assigned_to, type: email, in_list: true}
+    - {name: actions_performed, type: text}
+  list: {columns: [number, task_name, asset, due_date, maintenance_status], sort: due_date desc}
+
+- name: AssetDisposal
+  label: Asset Disposal
+  kind: document
+  module: assets
+  submittable: true
+  company_scoped: true
+  numbering: {template: "ADS-{FY}-{seq:5}", date_field: disposal_date}
+  description: "Scrap: submitting writes the asset off. Sell: create the sales invoice; submitting the invoice submits this disposal and books the gain or loss. Depreciation due up to the disposal date is booked first."
+  fields:
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true}
+    - {name: asset, type: link, to: Asset, required: true, in_list: true, in_filter: true}
+    - {name: disposal_type, type: select, options: [Sell, Scrap], required: true, default: Scrap, in_list: true, in_filter: true}
+    - {name: disposal_date, type: date, required: true, default_expr: today, in_list: true, description: "For a sale: the invoice's posting date"}
+    - {name: customer, type: link, to: Customer, visible_if: "doc.disposal_type == 'Sell'", required_if: "doc.disposal_type == 'Sell'"}
+    - {name: sale_amount, type: currency, min: "0", visible_if: "doc.disposal_type == 'Sell'", required_if: "doc.disposal_type == 'Sell'", description: Price before taxes in the company currency; the invoice line uses it}
+    - {name: sales_invoice, type: link, to: SalesInvoice, read_only: true, no_copy: true}
+    - {name: cost_center, type: link, to: CostCenter, link_filters: {is_group: false}}
+    - {name: gross_amount, type: currency, read_only: true, no_copy: true, label: Asset Cost}
+    - {name: accumulated_depreciation, type: currency, read_only: true, no_copy: true}
+    - {name: net_book_value, type: currency, read_only: true, no_copy: true}
+    - {name: proceeds, type: currency, read_only: true, no_copy: true}
+    - {name: gain_or_loss, type: currency, read_only: true, no_copy: true, in_list: true, description: Proceeds less net book value (negative = loss)}
+    - {name: disposal_account, type: link, to: Account, read_only: true, no_copy: true, label: Gain/Loss Account}
+    - {name: schedule_snapshot, type: json, read_only: true, hidden: true, no_copy: true, description: "Schedule rows the disposal removed, restored if it is cancelled"}
+    - {name: remarks, type: text}
+  rules:
+    - {name: positive_sale, check: "doc.disposal_type != 'Sell' || doc.sale_amount > 0.0", message: "Enter the sale amount"}
+  actions:
+    - {name: make_sales_invoice, label: Create Sales Invoice, docstatus: [0], permission: write, condition: "doc.disposal_type == 'Sell'"}
+  list: {columns: [number, asset, disposal_type, disposal_date, gain_or_loss], sort: disposal_date desc}

@@ -1,0 +1,12 @@
+id: assets
+name: Assets
+version: 0.1.0
+publisher: cbferrum
+summary: "Fixed assets: categories, depreciation schedules and posting, movements, maintenance, revaluation and disposal"
+description: README.md
+categories: [finance]
+license: AGPL-3.0-only
+runtime: native
+platform: ">=0.3, <0.4"
+packages: [assets]
+uninstall: ask
