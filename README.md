@@ -248,8 +248,8 @@ CHANGELOG.md  what changed in each version
 
 | Version | Highlights |
 |---|---|
-| **0.1.1** | Requires the ERP app : installing it in a workspace without ERP installs ERP whole, with its interface, rather than a few of its packages. |
-| **0.1.0** | First release: asset categories with per-company accounts, locations, assets with generated or manual depreciation schedules (straight line, … |
+| **0.1.1** | Requires the ERP app: installing it in a workspace without ERP installs ERP whole, with its interface, rather than a few of its packages. |
+| **0.1.0** | First release: asset categories with per-company accounts, locations, assets with generated or manual depreciation schedules (straight line … |
 
 Every version is in [CHANGELOG.md](CHANGELOG.md).
 
