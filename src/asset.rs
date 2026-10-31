@@ -10,7 +10,7 @@ use crate::setup;
 use crate::{check_places, installed, int, named};
 use async_trait::async_trait;
 use chrono::NaiveDate;
-use ferrum_domain::ledger::{self, Entry, Line};
+use ferrum_app_erp::ledger::{self, Entry, Line};
 use ferrum_domain::util::{b, company, d, elevated, get, id, money, rows, s, set, sys};
 use ferrum_kernel::value::parse_date;
 use ferrum_kernel::{Ctx, Doc, DocHook, Error, FieldError, HookCtx, Kernel, Result, Tx, store};

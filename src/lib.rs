@@ -96,6 +96,7 @@ mod tests {
     #[test]
     fn packages_form_a_valid_catalog_with_the_platform() {
         let mut pkgs = ferrum_domain::packages().expect("platform packages");
+        pkgs.extend(ferrum_app_erp::packages().expect("ERP's packages"));
         pkgs.extend(super::packages().expect("app packages parse"));
         let cat = ferrum_meta::Catalog::from_packages(pkgs).expect("they validate together");
         let all: Vec<String> = cat.packages().map(|p| p.name().to_string()).collect();

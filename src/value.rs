@@ -7,7 +7,7 @@ use crate::asset::{self, day, in_service};
 use crate::setup::check_account;
 use crate::{check_places, named};
 use async_trait::async_trait;
-use ferrum_domain::ledger::{self, Entry, Line};
+use ferrum_app_erp::ledger::{self, Entry, Line};
 use ferrum_domain::util::{b, company, d, get, id, money, rows, s, set, sys};
 use ferrum_kernel::{Doc, DocHook, Error, FieldError, HookCtx, Result};
 use rust_decimal::Decimal;
