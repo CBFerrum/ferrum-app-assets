@@ -13,6 +13,7 @@ mod asset;
 mod disposal;
 mod maintenance;
 mod movement;
+pub mod ops;
 mod periodic;
 mod purchase;
 mod reports;
@@ -45,7 +46,12 @@ pub fn register(h: &mut HookRegistry) {
         .register("AssetDisposal", Arc::new(disposal::DisposalHook))
         .register("SalesInvoice", Arc::new(disposal::SalesInvoiceHook))
         .register("JournalEntry", Arc::new(disposal::JournalEntryGuard));
+    h.add_site("assets_ops", Arc::new(ops::MaintenanceSite));
 }
+
+/// The manifest of the connector app with Operations (`connectors/ops/app.yaml`): its package is
+/// `assets_ops`, its code this crate's. It ships with Assets.
+pub const CONNECTOR_MANIFEST: &str = include_str!("../connectors/ops/app.yaml");
 
 /// This package's reports.
 pub fn reports() -> Vec<Arc<dyn ReportSource>> {
@@ -56,7 +62,8 @@ pub fn reports() -> Vec<Arc<dyn ReportSource>> {
 /// Books the depreciation that fell due (up to each workspace's today) and opens the maintenance
 /// tasks that came due, notifying their assignees.
 pub async fn maintenance(k: &Kernel) -> Result<()> {
-    periodic::run(k).await
+    periodic::run(k).await?;
+    ops::watch(k).await
 }
 
 /// Whether the workspace has this package (hooks on platform entities run for every workspace).
@@ -102,6 +109,7 @@ mod tests {
     fn packages_form_a_valid_catalog_with_the_platform() {
         let mut pkgs = ferrum_domain::packages().expect("platform packages");
         pkgs.extend(ferrum_app_erp::packages().expect("ERP's packages"));
+        pkgs.extend(ferrum_ops::packages().expect("Operations' packages"));
         pkgs.extend(super::packages().expect("app packages parse"));
         let cat = ferrum_meta::Catalog::from_packages(pkgs).expect("they validate together");
         let all: Vec<String> = cat.packages().map(|p| p.name().to_string()).collect();
