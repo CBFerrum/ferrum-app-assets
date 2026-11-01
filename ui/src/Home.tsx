@@ -207,14 +207,15 @@ function Attention({ groups, loading, error, retry }: { groups: Group[]; loading
         <h2 id="ast-attention">Needs attention</h2>
       </div>
       <div className="card-body">
-        {error ? (
-          <SectionError error={error} retry={retry} />
-        ) : loading && !shown.length ? (
+        {error ? <SectionError error={error} retry={retry} /> : null}
+        {loading && !shown.length ? (
           <Skeleton rows={4} />
         ) : !shown.length ? (
-          <EmptyState title="Nothing needs attention" icon="check">
-            Returns, checks, repairs and depreciation are all where they should be.
-          </EmptyState>
+          error ? null : (
+            <EmptyState title="Nothing needs attention" icon="check">
+              Returns, checks, repairs and depreciation are all where they should be.
+            </EmptyState>
+          )
         ) : (
           <ul className="ast-groups">
             {shown.map((g) => (
@@ -374,7 +375,7 @@ export function Home() {
 
   const body = byCategory.error ? (
     <ErrorState error={byCategory.error} onRetry={() => void byCategory.refetch()} title="The register could not be loaded" />
-  ) : byCategory.data && count === 0 && !byCategory.isFetching ? (
+  ) : byCategory.data && count === 0 && !byCategory.isFetching && asOf === today ? (
     <EmptyState title={everything ? "No assets yet" : "No assets in your care"} icon="file">
       {everything ? (
         <>
@@ -402,7 +403,7 @@ export function Home() {
         </Tile>
         <Tile
           label="Depreciation this month"
-          value={thisMonth ? money(thisMonth.total) : <span className="skeleton ast-tile-skel" />}
+          value={thisMonth ? money(thisMonth.total) : plan.error ? "—" : <span className="skeleton ast-tile-skel" />}
           sub={thisMonth ? `${money(thisMonth.booked)} booked so far` : undefined}
           to={`/r/asset_depreciation_schedule?${new URLSearchParams({ ...params, from_date: from, to_date: monthEnd(from), run: "1" })}`}
         />
