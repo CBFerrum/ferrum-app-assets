@@ -444,7 +444,8 @@ a.ast-tile:hover {
 
 .ast-side {
   position: sticky;
-  top: 0.75rem;
+  /* Under the platform's bar: its height is on the page. */
+  top: calc(var(--ferrum-bar-height, 0px) + 0.75rem);
   display: grid;
   gap: 0.75rem;
   padding: 0.875rem;
@@ -783,7 +784,7 @@ a.ast-tile:hover {
 
 .ast-scanbar {
   position: sticky;
-  top: 0;
+  top: var(--ferrum-bar-height, 0px);
   z-index: 5;
   display: grid;
   gap: 0.5rem;
@@ -902,6 +903,11 @@ a.ast-tile:hover {
 }
 
 @media (max-width: 900px) {
+  /* The frame's own bar, with the drawer's button, is showing here. */
+  .ast-scanbar {
+    top: calc(var(--ferrum-bar-height, 0px) + var(--topbar-h));
+  }
+
   .ast-grid,
   .ast-walk-cols {
     grid-template-columns: minmax(0, 1fr);
