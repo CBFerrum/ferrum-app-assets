@@ -40,6 +40,7 @@ jobs:
           psql postgres://postgres:postgres@localhost:5432/postgres -v ON_ERROR_STOP=1 <<'SQL'
           create role ferrum login password 'ferrum';
           create database ferrum_assets_test owner ferrum;
+          create database ferrum_assets_ops_test owner ferrum;
           SQL
       - run: cargo fmt -- --check
       - run: cargo clippy --all-targets -- -D warnings

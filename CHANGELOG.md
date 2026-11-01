@@ -1,5 +1,12 @@
 # Changelog
 
+## Assets Operations 0.1.0
+
+A connector between Assets and Operations, for maintaining equipment that is also on the floor: meters
+read from devices, condition rules that raise requests, failure codes, calibration records, and
+lockout with a separate return to service, because repaired does not mean safe to run. A lockout here
+is a record, not a physical lock. Run against simulated equipment only.
+
 ## 0.2.0
 
 - Assets has an interface of its own, at /assets/. Its overview shows what the company owns and what it is
