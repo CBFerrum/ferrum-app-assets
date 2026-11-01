@@ -196,7 +196,8 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
 
   return (
     <div className="stack ast-depr">
-      {stuck.length > 0 && (
+      {/* A draft books nothing yet, so nothing of its is overdue. */}
+      {stuck.length > 0 && (asset.docstatus ?? 0) === 1 && (
         <div className="alert alert-error" role="alert">
           <div className="alert-body">
             <strong>{stuck.some((p) => p.error) ? "Depreciation could not be booked." : "Depreciation is due and not booked yet."}</strong>{" "}
