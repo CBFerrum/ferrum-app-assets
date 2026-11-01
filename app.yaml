@@ -1,14 +1,35 @@
 id: assets
 name: Assets
-version: 0.1.1
+version: 0.2.0
 publisher: cbferrum
 summary: "Fixed assets: categories, depreciation schedules and posting, movements, maintenance, revaluation and disposal"
 description: README.md
 categories: [finance]
 license: AGPL-3.0-only
 runtime: native
-platform: ">=0.3.1, <0.4"
+platform: ">=0.3.2, <0.4"
 # Records of ERP (items, customers, accounts, stock): installing it installs ERP.
 requires: {erp: ">=0.1"}
 packages: [assets]
 uninstall: ask
+# Its own interface at /assets/ (Ferrum docs/plan/apps-ui.md §13): an overview of what the company owns
+# and what needs a person, an asset's page, and walking a room to verify what is there, with its records
+# in lists and forms (ui/, built into ui/dist).
+ui:
+  dist: ui/dist
+contributes:
+  shell.app:
+    - id: assets
+      route: assets
+      title: Assets
+      description: What the company owns, where it is and what it is worth
+      icon: boxes
+      color: "#475569"
+      roles: [Asset Manager, Asset User, Accounts Manager]
+  shell.open:
+    # An asset opens on its page; the rest of its records in the frame's forms and lists.
+    - {id: asset, entity: Asset, path: "assets/a/{id}", list: "assets/e/Asset", priority: 1}
+    - {id: assets, package: assets, path: "assets/e/{entity}/{id}", list: "assets/e/{entity}"}
+  shell.create:
+    - {id: asset, label: Asset, path: assets/e/Asset/new, entity: Asset}
+    - {id: verify, label: Verify a room, path: assets/verify, entity: AssetVerification}
