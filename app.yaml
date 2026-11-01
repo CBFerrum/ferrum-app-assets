@@ -30,6 +30,7 @@ contributes:
     # An asset opens on its page; the rest of its records in the frame's forms and lists.
     - {id: asset, entity: Asset, path: "assets/a/{id}", list: "assets/e/Asset", priority: 1}
     - {id: assets, package: assets, path: "assets/e/{entity}/{id}", list: "assets/e/{entity}"}
+    - {id: assets_ops, package: assets_ops, path: "assets/e/{entity}/{id}", list: "assets/e/{entity}"}
   shell.create:
     - {id: asset, label: Asset, path: assets/e/Asset/new, entity: Asset}
     - {id: verify, label: Verify a room, path: assets/verify, entity: AssetVerification}

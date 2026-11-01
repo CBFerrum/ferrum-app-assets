@@ -14,6 +14,3 @@ platform: ">=0.3.2, <0.4"
 requires: {assets: ">=0.2", ops: ">=0.1"}
 packages: [assets_ops]
 uninstall: ask
-contributes:
-  shell.open:
-    - {id: assets_ops, package: assets_ops, path: "assets/e/{entity}/{id}", list: "assets/e/{entity}"}
