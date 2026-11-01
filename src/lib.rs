@@ -84,6 +84,7 @@ pub(crate) fn check_places(doc: &Doc, field: &str, precision: u32) -> Result<()>
 }
 
 include!(concat!(env!("OUT_DIR"), "/packages.rs"));
+include!(concat!(env!("OUT_DIR"), "/ui.rs"));
 
 /// This app's manifest (`app.yaml`).
 pub const MANIFEST: &str = include_str!("../app.yaml");
@@ -95,6 +96,8 @@ pub fn packages() -> std::result::Result<Vec<ferrum_meta::Package>, ferrum_meta:
 
 #[cfg(test)]
 mod tests {
+    use super::{MANIFEST, UI};
+
     #[test]
     fn packages_form_a_valid_catalog_with_the_platform() {
         let mut pkgs = ferrum_domain::packages().expect("platform packages");
@@ -103,5 +106,14 @@ mod tests {
         let cat = ferrum_meta::Catalog::from_packages(pkgs).expect("they validate together");
         let all: Vec<String> = cat.packages().map(|p| p.name().to_string()).collect();
         ferrum_meta::effective::build(&cat, &all, &[], 1).expect("effective schema with every package");
+    }
+
+    #[test]
+    fn the_interface_is_a_release_the_platform_takes() {
+        let m = ferrum_apps::AppManifest::parse(MANIFEST).expect("app.yaml");
+        assert_eq!(m.routes(), vec![("assets".to_string(), vec![])]);
+        let files = UI.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect();
+        let ui = ferrum_apps::ui::prepare("assets", files).expect("ui/dist is an interface release");
+        assert!(UI.iter().any(|(p, _)| *p == "index.html") && !UI.iter().any(|(p, _)| p.starts_with('.')), "{}", ui.digest);
     }
 }
