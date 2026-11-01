@@ -18,8 +18,8 @@ import "./styles.css";
 const page = (name: "FormView" | "ListView" | "ReportView" | "AppSettingsPage" | "ScreenPage") => () =>
   import("./records").then((m) => ({ Component: m[name] }));
 
-/** Assets' package: the sidebar shows its modules. */
-const ASSET_PACKAGES = ["assets"];
+/** Assets' packages: the sidebar shows their modules. */
+const ASSET_PACKAGES = ["assets", "assets_ops"];
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 30_000 } },

@@ -1,0 +1,104 @@
+- name: FailureCode
+  label: Failure Code
+  kind: master
+  module: equipment_maintenance
+  title_field: code
+  fields:
+    - {name: code, type: data, required: true, unique: true, in_list: true}
+    - {name: description, type: data, in_list: true}
+    - {name: category, type: select, options: [Mechanical, Electrical, Software, Process, Operator, Unknown], default: Unknown, in_list: true, in_filter: true}
+  list: {columns: [code, description, category], sort: code asc}
+
+- name: AssetMeter
+  label: Asset Meter
+  label_plural: Asset Meters
+  kind: master
+  module: equipment_maintenance
+  title_field: meter_name
+  description: Running hours, cycles or distance, read from a device. Service falls due by use, not the calendar.
+  fields:
+    - {name: asset, type: link, to: Asset, in_list: true, in_filter: true}
+    - {name: meter_name, type: data, required: true, in_list: true}
+    - {name: device, type: link, to: Device, required: true, in_list: true}
+    - {name: metric, type: data, required: true, in_list: true}
+    - {name: reading, type: decimal, read_only: true, no_copy: true, in_list: true}
+    - {name: read_at, type: datetime, read_only: true, no_copy: true}
+    - {name: service_every, type: decimal, required: true, min: "0.000000001", in_list: true}
+    - {name: next_service_at, type: decimal, required: true, in_list: true}
+  list: {columns: [meter_name, device, reading, next_service_at], sort: meter_name asc}
+
+- name: ConditionRule
+  label: Condition Rule
+  label_plural: Condition Rules
+  kind: master
+  module: equipment_maintenance
+  title_field: rule_name
+  description: A value out of its range for long enough opens a request. Missing data is never a condition.
+  fields:
+    - {name: rule_name, type: data, required: true, in_list: true}
+    - {name: asset, type: link, to: Asset, in_filter: true}
+    - {name: device, type: link, to: Device, required: true, in_list: true}
+    - {name: metric, type: data, required: true, in_list: true}
+    - {name: above, type: decimal, in_list: true}
+    - {name: below, type: decimal, in_list: true}
+    - {name: sustained_minutes, type: int, default: 5, min: 1, max: 1440, in_list: true}
+    - {name: active, type: check, default: true, in_list: true, in_filter: true}
+  rules:
+    - {name: has_a_limit, check: "doc.above != null || doc.below != null", message: "Set a limit above or below"}
+  list: {columns: [rule_name, device, metric, above, below, active], sort: rule_name asc}
+
+- name: MaintenanceRequest
+  label: Maintenance Request
+  label_plural: Maintenance Requests
+  kind: master
+  module: equipment_maintenance
+  title_field: title
+  fields:
+    - {name: title, type: data, required: true, in_list: true}
+    - {name: asset, type: link, to: Asset, in_list: true, in_filter: true}
+    - {name: device, type: link, to: Device, in_list: true, in_filter: true}
+    - {name: source, type: select, options: [Person, Meter, Condition, Prediction], default: Person, read_only: true, in_list: true, in_filter: true}
+    - {name: priority, type: select, options: [Low, Normal, High], default: Normal, in_list: true, in_filter: true}
+    - {name: status, type: select, options: [Open, In Progress, Repaired, Closed, Rejected], default: Open, read_only: true, no_copy: true, in_list: true, in_filter: true}
+    - {name: failure_code, type: link, to: FailureCode, in_filter: true}
+    - {name: root_cause, type: text}
+    - {name: work_done, type: text}
+    - {name: evidence, type: json, read_only: true, no_copy: true, description: "What triggered it"}
+    - {name: rule, type: link, to: ConditionRule, read_only: true}
+    - {name: meter, type: link, to: AssetMeter, read_only: true}
+  list: {columns: [title, device, source, priority, status], sort: title asc}
+
+- name: EquipmentLockout
+  label: Equipment Lockout
+  label_plural: Equipment Lockouts
+  kind: master
+  module: equipment_maintenance
+  title_field: reason
+  description: While locked, nothing can be sent to this equipment. Finishing the work does not end it. A return to service does, by someone authorized, on purpose.
+  fields:
+    - {name: device, type: link, to: Device, required: true, in_list: true, in_filter: true}
+    - {name: reason, type: data, required: true, in_list: true}
+    - {name: permit, type: data, in_list: true, label: Work Permit, description: "The site's own permit. Physical isolation is the site's procedure: this records it, and does not perform it"}
+    - {name: request, type: link, to: MaintenanceRequest}
+    - {name: status, type: select, options: [Locked, Returned], default: Locked, read_only: true, no_copy: true, in_list: true, in_filter: true}
+    - {name: locked_by, type: data, read_only: true, no_copy: true}
+    - {name: returned_by, type: data, read_only: true, no_copy: true}
+    - {name: returned_at, type: datetime, read_only: true, no_copy: true}
+    - {name: return_note, type: text, read_only: true, no_copy: true}
+  list: {columns: [device, reason, permit, status], sort: reason asc}
+
+- name: CalibrationRecord
+  label: Calibration Record
+  label_plural: Calibration Records
+  kind: master
+  module: equipment_maintenance
+  title_field: certificate
+  fields:
+    - {name: asset, type: link, to: Asset, in_list: true, in_filter: true}
+    - {name: device, type: link, to: Device, in_list: true, in_filter: true}
+    - {name: certificate, type: data, required: true, in_list: true}
+    - {name: calibrated_on, type: date, required: true, in_list: true}
+    - {name: valid_until, type: date, required: true, in_list: true, in_filter: true}
+    - {name: result, type: select, options: [Pass, Adjusted, Fail], default: Pass, in_list: true, in_filter: true}
+    - {name: notes, type: text}
+  list: {columns: [certificate, device, calibrated_on, valid_until, result], sort: valid_until asc}

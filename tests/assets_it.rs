@@ -156,6 +156,7 @@ async fn scenario() {
     let db = Db::connect(DbConfig { url, max_connections: 10, ..Default::default() }).await.expect("connect");
     sqlx::raw_sql("drop schema if exists public cascade; create schema public;").execute(&db.pool).await.expect("reset");
     let mut packages = ferrum_domain::packages().expect("platform packages");
+    packages.extend(ferrum_ops::packages().expect("ops"));
     packages.extend(ferrum_app_erp::packages().expect("ERP's packages"));
     packages.extend(ferrum_app_assets::packages().expect("app packages"));
     let catalog = Catalog::from_packages(packages).expect("catalog");
