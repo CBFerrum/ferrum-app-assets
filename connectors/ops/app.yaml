@@ -1,0 +1,19 @@
+# Assets' connector with Operations: maintenance of equipment that is also a device. Lockout, meters,
+# conditions and return to service need both apps' records. Offered where both are installed.
+id: assets-ops
+name: Equipment Maintenance
+version: 0.1.0
+publisher: cbferrum
+summary: Lockout, meter and condition triggers, failure codes, calibration and return to service
+categories: [manufacturing]
+license: AGPL-3.0-only
+homepage: https://github.com/CBFerrum/ferrum-app-assets
+support: https://github.com/CBFerrum/ferrum-app-assets/issues
+runtime: native
+platform: ">=0.3.2, <0.4"
+requires: {assets: ">=0.2", ops: ">=0.1"}
+packages: [assets_ops]
+uninstall: ask
+contributes:
+  shell.open:
+    - {id: assets_ops, package: assets_ops, path: "assets/e/{entity}/{id}", list: "assets/e/{entity}"}
