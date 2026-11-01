@@ -5,7 +5,7 @@
   <img alt="Ferrum Assets" src="docs/assets/banner-light.svg" width="100%">
 </picture>
 
-[![CI](https://github.com/CBFerrum/ferrum-app-assets/actions/workflows/ci.yml/badge.svg)](https://github.com/CBFerrum/ferrum-app-assets/actions/workflows/ci.yml) ![Version](https://img.shields.io/badge/version-0.1.1-30a665?style=flat-square) ![Ferrum](https://img.shields.io/badge/Ferrum-%3E%3D0.3.1%2C%20%3C0.4-2f5bea?style=flat-square) ![License](https://img.shields.io/badge/license-AGPL--3.0-3b82f6?style=flat-square) ![Rust](https://img.shields.io/badge/Rust-native%20app-b7410e?style=flat-square&logo=rust&logoColor=white) ![MCP](https://img.shields.io/badge/AI%20agents-MCP-8b5cf6?style=flat-square)
+[![CI](https://github.com/CBFerrum/ferrum-app-assets/actions/workflows/ci.yml/badge.svg)](https://github.com/CBFerrum/ferrum-app-assets/actions/workflows/ci.yml) ![Version](https://img.shields.io/badge/version-0.2.0-30a665?style=flat-square) ![Ferrum](https://img.shields.io/badge/Ferrum-%3E%3D0.3.2%2C%20%3C0.4-2f5bea?style=flat-square) ![License](https://img.shields.io/badge/license-AGPL--3.0-3b82f6?style=flat-square) ![Rust](https://img.shields.io/badge/Rust-native%20app-b7410e?style=flat-square&logo=rust&logoColor=white) ![Interface](https://img.shields.io/badge/interface-React%20%2B%20Vite-0ea5e9?style=flat-square&logo=react&logoColor=white) ![MCP](https://img.shields.io/badge/AI%20agents-MCP-8b5cf6?style=flat-square)
 
 **A native app for [Ferrum](https://github.com/CBFerrum/Ferrum), the open-source, AI-first business platform.**
 
@@ -20,19 +20,21 @@
 Ferrum Assets keeps the fixed asset register: categories with depreciation defaults and
 accounts per company; assets with location, custodian and cost center; depreciation schedules
 generated with exact decimal maths and posted automatically as journal entries; and movements,
-maintenance, revaluation and disposal, each booked in the ledger.
+maintenance, revaluation and disposal, each booked in the ledger. Its own interface shows what the
+company owns and what needs a person, gives every asset a page of its own, and walks a room to
+verify what is there.
 
 
 | At a glance | |
 |---|---|
-| 📦 Version | `0.1.1` |
-| 🧱 Platform | Ferrum `>=0.3.1, <0.4` |
+| 📦 Version | `0.2.0` |
+| 🧱 Platform | Ferrum `>=0.3.2, <0.4` |
 | 🔗 Requires | erp `>=0.1` |
-| 🖥️ Interface | Ferrum's records screens (`/data/assets/`) |
-| 🗃️ Records | 14 entities in 1 package |
+| 🖥️ Interface | its own, at `/assets/` |
+| 🗃️ Records | 15 entities in 1 package |
 | 👥 Roles | 3: Asset Manager, Asset User, Accounts Manager |
 | 📊 Reports | 5 |
-| 🧪 Tests | 13 Rust tests |
+| 🧪 Tests | 16 Rust tests, 7 interface test files |
 
 
 ## Highlights
@@ -80,6 +82,20 @@ Register, depreciation schedules and movement history.
 
 </td>
 </tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🧭 Overview and asset pages
+What is owned and what it is worth, depreciation by month, what needs a person; every asset's value over time and whole story on one page.
+
+</td>
+<td width="50%" valign="top">
+
+### ✅ Verification
+Walk a room, scan or tick off what is there; serial and warranty details; handed out until a date.
+
+</td>
+</tr>
 </table>
 
 ## Screenshots
@@ -114,13 +130,13 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph Browser
-        UI["Records screens<br/><small>/data/assets/</small>"]
+        UI["Its interface<br/><small>/assets/</small>"]
         BAR["Ferrum bar<br/><small>launcher · search · bell</small>"]
     end
     subgraph Server["Ferrum server"]
         API["REST · MCP · live"]
         K["Kernel<br/><small>permissions · row-level security · audit</small>"]
-        APP["Assets<br/><small>14 entities · 3 roles</small>"]
+        APP["Assets<br/><small>15 entities · 3 roles</small>"]
         OB[("Outbox")]
     end
     DB[("PostgreSQL")]
@@ -137,9 +153,17 @@ Everything Assets adds is ordinary Ferrum metadata and Rust: its records get lis
 search, permissions, an audit trail, exports and the REST and MCP APIs for free, so AI agents work
 with them under the same rules as people.
 
+### What it adds to Ferrum
+
+| Where | What |
+|---|---|
+| 🚀 Launcher | **Assets** at `/assets/` |
+| ➕ Create menu | Asset |
+| ➕ Create menu | Verify a room |
+
 ## Data model
 
-The main records and how they connect (14 entities in all; `packages/` has every field).
+The main records and how they connect (15 entities in all; `packages/` has every field).
 
 ```mermaid
 erDiagram
@@ -166,6 +190,10 @@ erDiagram
         string task
         string maintenance_status
     }
+    AssetVerification {
+        date verified_on
+        string result
+    }
     Item ||--o{ Asset : "item"
     Location ||--o{ Asset : "location"
     Asset ||--|{ AssetDepreciationSchedule : "schedule"
@@ -174,15 +202,16 @@ erDiagram
     Asset ||--o{ AssetMaintenance : "asset"
     AssetMaintenance ||--o{ AssetMaintenanceLog : "asset_maintenance"
     Asset ||--o{ AssetMaintenanceLog : "asset"
+    Asset ||--o{ AssetVerification : "asset"
 ```
 
 ### Roles
 
 | Role | What it is for | Entities |
 |---|---|---|
-| **Asset Manager** | Registers, depreciates, moves, revalues, repairs, maintains and disposes of assets. | 24 |
+| **Asset Manager** | Registers, depreciates, moves, revalues, repairs, maintains and disposes of assets. | 25 |
 | **Asset User** | Looks after the assets in their custody - sees them, records their repairs and maintenance work. | 10 |
-| **Accounts Manager** |  | 10 |
+| **Accounts Manager** |  | 11 |
 
 <details>
 <summary><b>Reports (5)</b></summary>
@@ -217,6 +246,7 @@ Point the platform dependencies at your checkout (this file is git-ignored):
 ```toml
 # .cargo/config.toml
 [patch."https://github.com/CBFerrum/Ferrum"]
+ferrum-apps = { path = "../ferrum/crates/apps" }
 ferrum-calc = { path = "../ferrum/crates/calc" }
 ferrum-domain = { path = "../ferrum/crates/domain" }
 ferrum-kernel = { path = "../ferrum/crates/kernel" }
@@ -243,12 +273,24 @@ ferrum-app-erp = { path = "../ferrum-app-erp" }
 ```
 
 
+The interface lives in `ui/` and builds with Ferrum-Frontend's packages (`ferrum/web`, next to this folder):
+
+```bash
+cd ui
+npm run build      # ui/dist, checked against the size budget
+npm test
+```
+
+With a development server started with `FERRUM_DEV_UI=1`, `ferrum-app dev --ui` serves the pages
+from Vite behind the real bar and session, with hot reload.
+
 ### Project layout
 
 ```text
 app.yaml      the manifest: id, version, requirements, what it adds to Ferrum
 packages/     metadata: entities, roles, reports, workflows, print formats
 src/          the app's logic in Rust: hooks, actions, endpoints, upkeep jobs
+ui/           its own interface (React + Vite), built into ui/dist
 tests/        integration tests against a real PostgreSQL
 CHANGELOG.md  what changed in each version
 ```
@@ -257,6 +299,7 @@ CHANGELOG.md  what changed in each version
 
 | Version | Highlights |
 |---|---|
+| **0.2.0** | An interface of its own: an overview of what is owned and what needs a person, a page for every asset, and verifying a room; serial number, warranty, return dates and physical verification. |
 | **0.1.1** | Requires the ERP app: installing it in a workspace without ERP installs ERP whole, with its interface, rather than a few of its packages. |
 | **0.1.0** | First release: asset categories with per-company accounts, locations, assets with generated or manual depreciation schedules (straight line … |
 
