@@ -98,3 +98,7 @@ roles:
 personal_data:
   - {entity: Asset, match: custodian, erase: [custodian]}
   - {entity: AssetMaintenanceLog, match: assigned_to, erase: [assigned_to]}
+handover:
+  - {entity: Asset, field: custodian, where: {status: [Draft, Submitted, Partially Depreciated, Fully Depreciated, In Maintenance, Out of Order]}}
+  - {entity: AssetMaintenance, field: maintenance_manager}
+  - {entity: AssetMaintenance, field: tasks.assign_to}
