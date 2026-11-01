@@ -7,6 +7,7 @@
     - {name: target_location, type: link, to: Location, link_filters: {is_group: false}, in_list: true, description: Empty = it stays where it is}
     - {name: from_custodian, type: email, read_only: true, in_list: true}
     - {name: to_custodian, type: email, in_list: true}
+    - {name: expected_return_date, type: date, label: Due Back, description: When the custodian is to hand it back (an issue only)}
 
 - name: AssetMovement
   label: Asset Movement
@@ -24,6 +25,25 @@
     - {name: assets, type: table, of: AssetMovementItem, required: true}
     - {name: remarks, type: text}
   list: {columns: [number, purpose, transaction_date], sort: transaction_date desc}
+
+- name: AssetVerification
+  label: Asset Verification
+  kind: document
+  module: assets
+  submittable: true
+  company_scoped: true
+  numbering: {template: "AVF-{FY}-{seq:5}", date_field: verified_on}
+  description: "A physical check: someone saw the asset, or looked and could not find it. Submitting it records the check on the asset; cancelling takes it back."
+  fields:
+    - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true}
+    - {name: asset, type: link, to: Asset, required: true, in_list: true, in_filter: true}
+    - {name: verified_on, type: date, required: true, default_expr: today, in_list: true, in_filter: true}
+    - {name: result, type: select, options: [Found, Not Found], required: true, default: Found, in_list: true, in_filter: true}
+    - {name: seen_at, type: link, to: Location, link_filters: {is_group: false}, in_list: true, description: "Where it was seen (default: where the asset is recorded)"}
+    - {name: next_verification_date, type: date, description: "When it is next due (default: its category's interval after this check)"}
+    - {name: verified_by, type: email, read_only: true, no_copy: true, in_list: true}
+    - {name: note, type: text}
+  list: {columns: [number, asset, verified_on, result, seen_at], sort: verified_on desc}
 
 - name: AssetValueAdjustment
   label: Asset Value Adjustment

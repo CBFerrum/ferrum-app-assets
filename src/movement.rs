@@ -1,13 +1,15 @@
 //! Asset movements: transfers between locations, issues to custodians and receipts back. The
 //! submitted movements are the custody history; the asset carries where it is and who has it.
 //! A movement is undone (cancelled) only while no later movement has moved its assets again.
+//! An issue may say when the custodian is to hand the asset back; the asset carries the date of
+//! the issue that still stands, worked out from the movements (`due_back`), never accumulated.
 
 use crate::asset::{self, day, in_service};
 use crate::named;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use ferrum_domain::util::{get, id, rows, s, set, sys};
-use ferrum_kernel::{Doc, DocHook, Error, FieldError, HookCtx, Result};
+use ferrum_kernel::{Doc, DocHook, Error, FieldError, HookCtx, Result, Tx};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -31,6 +33,35 @@ fn custodian(doc: &Doc, k: &str) -> Option<String> {
 
 fn put(doc: &mut Doc, list: Vec<Doc>) {
     set(doc, "assets", Value::Array(list.into_iter().map(Value::Object).collect()));
+}
+
+/// One standing movement of an asset: purpose, the date it asked for, who held it before and after.
+type Step = (String, Option<NaiveDate>, Option<String>, Option<String>);
+
+/// When the asset is due back: what the last issue asked for, until the custody changes hands
+/// again (a receipt, or a transfer to another person), oldest movement first.
+fn fold_due(history: &[Step]) -> Option<NaiveDate> {
+    let who = |c: &Option<String>| c.as_deref().map(str::to_lowercase);
+    history.iter().fold(None, |due, (purpose, date, from, to)| match purpose.as_str() {
+        "Issue" => *date,
+        _ if who(from) == who(to) => due,
+        _ => None,
+    })
+}
+
+/// The date the asset is due back, from the movements that stand (a cancelled one counts for
+/// nothing).
+pub(crate) async fn due_back(tx: &mut Tx, tenant: Uuid, asset: Uuid) -> Result<Option<NaiveDate>> {
+    let history: Vec<Step> = sqlx::query_as(
+        "select m.purpose, i.expected_return_date, i.from_custodian, i.to_custodian from e_asset_movement__assets i \
+         join e_asset_movement m on m.tenant_id = i.tenant_id and m.id = i.parent_id \
+         where i.tenant_id = $1 and i.asset = $2 and m.docstatus = 1 order by m.transaction_date, m.created_at, i.idx",
+    )
+    .bind(tenant)
+    .bind(asset)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(fold_due(&history))
 }
 
 pub struct MovementHook;
@@ -92,6 +123,13 @@ impl DocHook for MovementHook {
             if latest.is_some_and(|l| on < l) {
                 errors.push(err("asset", format!("asset {} moved later than this date already", named(&current))));
             }
+            if let Some(due) = day(r, "expected_return_date") {
+                if purpose != "Issue" {
+                    errors.push(err("expected_return_date", "only an issue has a return date".into()));
+                } else if due < on {
+                    errors.push(err("expected_return_date", "cannot be before the day it is handed out".into()));
+                }
+            }
             let (target, to) = effective(&purpose, r);
             match purpose.as_str() {
                 "Transfer" if id(r, "target_location").is_none() || target == id(r, "source_location") => {
@@ -132,6 +170,9 @@ impl DocHook for MovementHook {
             let mut v = Doc::new();
             v.insert("location".into(), r.get("target_location").cloned().unwrap_or(Value::Null));
             v.insert("custodian".into(), r.get("to_custodian").cloned().unwrap_or(Value::Null));
+            if in_service(&current).is_ok() {
+                v.insert("expected_return_date".into(), json!(due_back(hc.tx, hc.ctx.tenant, a).await?.map(|d| d.to_string())));
+            }
             hc.kernel.set_values_tx(&sys(hc.ctx), hc.tx, "Asset", a, v).await?;
         }
         Ok(())
@@ -147,8 +188,37 @@ impl DocHook for MovementHook {
             let mut v = Doc::new();
             v.insert("location".into(), r.get("source_location").cloned().unwrap_or(Value::Null));
             v.insert("custodian".into(), r.get("from_custodian").cloned().unwrap_or(Value::Null));
+            if in_service(&current).is_ok() {
+                v.insert("expected_return_date".into(), json!(due_back(hc.tx, hc.ctx.tenant, a).await?.map(|d| d.to_string())));
+            }
             hc.kernel.set_values_tx(&sys(hc.ctx), hc.tx, "Asset", a, v).await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(purpose: &str, due: Option<&str>, from: Option<&str>, to: Option<&str>) -> Step {
+        (purpose.into(), due.map(|d| d.parse().unwrap()), from.map(Into::into), to.map(Into::into))
+    }
+
+    #[test]
+    fn an_asset_is_due_back_until_its_custody_changes_hands() {
+        let day = |d: &str| Some(d.parse::<NaiveDate>().unwrap());
+        assert_eq!(fold_due(&[]), None);
+        let issue = step("Issue", Some("2024-04-01"), None, Some("bob@acme.test"));
+        assert_eq!(fold_due(std::slice::from_ref(&issue)), day("2024-04-01"));
+        let moved = step("Transfer", None, Some("Bob@acme.test"), Some("bob@acme.test"));
+        assert_eq!(fold_due(&[issue.clone(), moved]), day("2024-04-01"), "the same person in another room: still due");
+        let handed_on = step("Transfer", None, Some("bob@acme.test"), Some("alice@acme.test"));
+        assert_eq!(fold_due(&[issue.clone(), handed_on]), None, "a new custodian inherits no date");
+        let back = step("Receipt", None, Some("bob@acme.test"), None);
+        assert_eq!(fold_due(&[issue.clone(), back.clone()]), None, "handed back");
+        let again = step("Issue", Some("2024-06-01"), None, Some("bob@acme.test"));
+        assert_eq!(fold_due(&[issue, back, again]), day("2024-06-01"), "the last issue decides");
+        assert_eq!(fold_due(&[step("Issue", None, None, Some("bob@acme.test"))]), None, "an issue with no date is due whenever");
     }
 }

@@ -310,14 +310,15 @@ struct MoveRow {
     to_location: Option<String>,
     from_custodian: Option<String>,
     to_custodian: Option<String>,
+    due_back: Option<NaiveDate>,
 }
 
-/// Submitted movements, oldest first: where each asset went and who held it.
+/// Submitted movements, oldest first: where each asset went, who held it, and when it was due back.
 async fn movements(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p: &Params<'_>) -> Result<Value> {
     let (from, to) = period(p, co)?;
     let mut qb = QueryBuilder::<Postgres>::new(
         "select m.id as movement_id, m.number as movement, m.transaction_date, m.purpose, a.number as asset, a.asset_name, \
-         ls.location_name as from_location, lt.location_name as to_location, i.from_custodian, i.to_custodian \
+         ls.location_name as from_location, lt.location_name as to_location, i.from_custodian, i.to_custodian, i.expected_return_date as due_back \
          from e_asset_movement__assets i join e_asset_movement m on m.tenant_id = i.tenant_id and m.id = i.parent_id \
          join e_asset a on a.tenant_id = i.tenant_id and a.id = i.asset \
          left join e_location ls on ls.tenant_id = i.tenant_id and ls.id = i.source_location \
@@ -340,14 +341,15 @@ async fn movements(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p: &P
         .take(MAX_ROWS as usize)
         .map(|r| {
             json!({"transaction_date": r.transaction_date, "movement": r.movement, "movement_id": r.movement_id, "purpose": r.purpose, "asset": r.asset,
-                "asset_name": r.asset_name, "from_location": r.from_location, "to_location": r.to_location, "from_custodian": r.from_custodian, "to_custodian": r.to_custodian})
+                "asset_name": r.asset_name, "from_location": r.from_location, "to_location": r.to_location, "from_custodian": r.from_custodian, "to_custodian": r.to_custodian,
+                "due_back": r.due_back})
         })
         .collect();
     let count = rows.len();
     Ok(json!({
         "columns": [col("transaction_date", "Date", "date"), col("movement", "Movement", "data"), col("purpose", "Purpose", "data"), col("asset", "Asset", "data"),
             col("asset_name", "Asset Name", "data"), col("from_location", "From", "data"), col("to_location", "To", "data"),
-            col("from_custodian", "From Custodian", "data"), col("to_custodian", "To Custodian", "data")],
+            col("from_custodian", "From Custodian", "data"), col("to_custodian", "To Custodian", "data"), col("due_back", "Due Back", "date")],
         "rows": rows,
         "totals": {"count": count},
         "meta": {"from_date": from, "to_date": to, "truncated": truncated},
@@ -357,6 +359,7 @@ async fn movements(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p: &P
 #[derive(sqlx::FromRow)]
 struct DueRow {
     plan_id: Uuid,
+    asset_id: Uuid,
     asset: Option<String>,
     asset_name: Option<String>,
     task_name: Option<String>,
@@ -373,7 +376,7 @@ async fn maintenance_due(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany,
     let days: i64 = p.str("days").map(|d| d.parse().map_err(|_| Error::field("days", "must be a whole number"))).transpose()?.unwrap_or(30).clamp(0, 3660);
     let horizon = as_of + Duration::days(days);
     let mut qb = QueryBuilder::<Postgres>::new(
-        "select m.id as plan_id, a.number as asset, a.asset_name, t.task_name, t.maintenance_type, t.periodicity, t.assign_to, t.last_completion_date, t.next_due_date \
+        "select m.id as plan_id, a.id as asset_id, a.number as asset, a.asset_name, t.task_name, t.maintenance_type, t.periodicity, t.assign_to, t.last_completion_date, t.next_due_date \
          from e_asset_maintenance__tasks t join e_asset_maintenance m on m.tenant_id = t.tenant_id and m.id = t.parent_id \
          join e_asset a on a.tenant_id = m.tenant_id and a.id = m.asset where t.tenant_id = ",
     );
@@ -403,7 +406,7 @@ async fn maintenance_due(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany,
                 0 => "Due Today",
                 _ => "Upcoming",
             };
-            json!({"asset": r.asset, "asset_name": r.asset_name, "asset_maintenance": r.plan_id, "task_name": r.task_name, "maintenance_type": r.maintenance_type,
+            json!({"asset": r.asset, "asset_id": r.asset_id, "asset_name": r.asset_name, "asset_maintenance": r.plan_id, "task_name": r.task_name, "maintenance_type": r.maintenance_type,
                 "periodicity": r.periodicity, "assign_to": r.assign_to, "last_completion_date": r.last_completion_date, "next_due_date": r.next_due_date,
                 "days_overdue": late.max(0), "status": status})
         })

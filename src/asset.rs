@@ -218,6 +218,25 @@ pub(crate) fn booked_until(doc: &Doc) -> Option<NaiveDate> {
     rows(doc, "schedule").iter().filter(|r| b(r, "booked")).map(row_day).max()
 }
 
+/// The fields `carry_dates` keeps.
+pub(crate) const DATES: &[&str] = &["expected_return_date", "last_verified_date", "verification_result", "next_verification_date"];
+
+/// What an asset carries of its movements and verifications, worked out from those that stand
+/// (never accumulated): when it is due back, and the last verification's day, finding and next due
+/// date. An asset out of service (disposed of, cancelled) is due nothing, so no list of what is
+/// due shows it; the day it was last verified stays.
+pub(crate) async fn carry_dates(tx: &mut Tx, tenant: Uuid, doc: &mut Doc, in_service: bool) -> Result<()> {
+    let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
+    let latest = crate::verification::standing(tx, tenant, asset).await?;
+    let due = if in_service { crate::movement::due_back(tx, tenant, asset).await? } else { None };
+    set(doc, "last_verified_date", json!(latest.as_ref().map(|l| l.0.to_string())));
+    let live = latest.filter(|_| in_service);
+    set(doc, "verification_result", json!(live.as_ref().map(|l| l.1.clone())));
+    set(doc, "next_verification_date", json!(live.and_then(|l| l.2).map(|n| n.to_string())));
+    set(doc, "expected_return_date", json!(due.map(|d| d.to_string())));
+    Ok(())
+}
+
 /// Refuses a change to an asset that is not in service (draft, cancelled, sold or scrapped).
 pub(crate) fn in_service(asset: &Doc) -> Result<()> {
     let name = named(asset);
@@ -503,6 +522,10 @@ async fn capitalize(hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
     Ok(())
 }
 
+/// What Edit Details changes: text facts, then dates.
+const DETAIL_TEXTS: &[&str] = &["serial_number", "manufacturer", "model_number"];
+const DETAIL_DATES: &[&str] = &["warranty_expiry_date", "end_of_life_date"];
+
 pub struct AssetHook;
 
 #[async_trait]
@@ -645,8 +668,54 @@ impl DocHook for AssetHook {
         }
         let co = company(hc.kernel, hc.ctx, hc.tx, id(doc, "company").unwrap_or_default()).await?;
         ledger::reverse(hc.tx, hc.ctx, "Asset", asset, hc.ctx.today(), co.precision).await?;
+        carry_dates(hc.tx, hc.ctx.tenant, &mut current, false).await?;
         save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())
+    }
+
+    /// Edit Details: serial number, maker, model, warranty and end of life are facts about the
+    /// thing, not part of what was booked, so they stay editable on a submitted asset (which the
+    /// form cannot do). A field left out of the parameters stays as it is; an empty one is cleared.
+    async fn action(&self, hc: &mut HookCtx<'_>, name: &str, doc: &Doc, params: &Value) -> Result<Option<Value>> {
+        if name != "update_details" {
+            return Ok(None);
+        }
+        let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
+        let mut v = Doc::new();
+        let mut errors = Vec::new();
+        for f in DETAIL_TEXTS.iter().chain(DETAIL_DATES) {
+            let text = match params.get(*f) {
+                None => continue,
+                Some(Value::Null) => "",
+                Some(Value::String(t)) => t.trim(),
+                Some(_) => {
+                    errors.push(FieldError::new(*f, "must be text"));
+                    continue;
+                }
+            };
+            if text.is_empty() {
+                v.insert(f.to_string(), Value::Null);
+            } else if DETAIL_DATES.contains(f) {
+                match parse_date(text) {
+                    Ok(on) => v.insert(f.to_string(), json!(on.to_string())),
+                    Err(_) => {
+                        errors.push(FieldError::new(*f, "is not a date (use YYYY-MM-DD)"));
+                        continue;
+                    }
+                };
+            } else if text.chars().count() > 120 {
+                errors.push(FieldError::new(*f, "is longer than 120 characters"));
+            } else {
+                v.insert(f.to_string(), json!(text));
+            }
+        }
+        if !errors.is_empty() {
+            return Err(Error::Validation(errors));
+        }
+        if !v.is_empty() {
+            hc.kernel.set_values_tx(&sys(hc.ctx), hc.tx, "Asset", asset, v).await?;
+        }
+        Ok(Some(json!({"message": "Details saved"})))
     }
 
     async fn before_delete(&self, hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
