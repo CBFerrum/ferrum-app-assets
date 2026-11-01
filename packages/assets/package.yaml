@@ -95,3 +95,6 @@ roles:
       - {entity: AssetMaintenance, read: true}
       - {entity: AssetMaintenanceLog, read: true}
       - {entity: AssetDisposal, read: true, export: true}
+personal_data:
+  - {entity: Asset, match: custodian, erase: [custodian]}
+  - {entity: AssetMaintenanceLog, match: assigned_to, erase: [assigned_to]}

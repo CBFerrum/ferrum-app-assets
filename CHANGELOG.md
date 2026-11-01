@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Personal data: a person's request now reaches assets in their custody and maintenance logs assigned to them, and an erasure takes their name off them.
+
 ## 0.1.1
 
 - Requires the ERP app (Ferrum docs/plan/apps-ui.md §13): installing it in a workspace without ERP
