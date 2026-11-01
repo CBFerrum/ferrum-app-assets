@@ -53,7 +53,9 @@ async fn scenario() {
     ferrum_app_erp::register(&mut hooks);
     ferrum_ops::register(&mut hooks);
     ferrum_app_assets::register(&mut hooks);
-    let k = Kernel::boot(db, Catalog::from_packages(packages).unwrap(), hooks, KernelSettings::default(), None).await.expect("boot");
+    let catalog = Catalog::from_packages(packages).unwrap();
+    assert_eq!(catalog.links_out_of_reach("assets_ops"), Vec::<String>::new(), "whoever fills in a link can look up what it points at");
+    let k = Kernel::boot(db, catalog, hooks, KernelSettings::default(), None).await.expect("boot");
     ferrum_domain::maintenance(&k).await.unwrap();
     ferrum_app_erp::maintenance(&k).await.unwrap();
     let tenant = k

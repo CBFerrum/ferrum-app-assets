@@ -16,6 +16,8 @@ roles:
   - name: Maintenance Technician
     description: Works on equipment, locks it out and records what was done. Cannot put it back into service.
     permissions:
+      - {entity: Asset, read: true}
+      - {entity: Device, read: true}
       - {entity: MaintenanceRequest, read: true, write: true, create: true}
       - {entity: EquipmentLockout, read: true}
       - {entity: AssetMeter, read: true}
@@ -25,11 +27,18 @@ roles:
   - name: Return to Service Authority
     description: Hands equipment back to operations after maintenance. Separate on purpose - repaired does not mean safe to restart.
     permissions:
+      - {entity: Asset, read: true}
+      - {entity: AssetMeter, read: true}
+      - {entity: ConditionRule, read: true}
+      - {entity: Device, read: true}
+      - {entity: FailureCode, read: true}
       - {entity: MaintenanceRequest, read: true}
       - {entity: EquipmentLockout, read: true}
   - name: Maintenance Planner
     description: Sets up meters, conditions and failure codes.
     permissions:
+      - {entity: Asset, read: true}
+      - {entity: Device, read: true}
       - {entity: MaintenanceRequest, read: true, write: true, create: true, export: true}
       - {entity: EquipmentLockout, read: true, export: true}
       - {entity: AssetMeter, read: true, write: true, create: true, delete: true, export: true, import: true}
