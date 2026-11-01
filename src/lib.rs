@@ -19,6 +19,7 @@ mod reports;
 pub mod schedule;
 mod setup;
 mod value;
+mod verification;
 
 use ferrum_domain::reports::ReportSource;
 use ferrum_domain::util::{d, s};
@@ -36,6 +37,7 @@ pub fn register(h: &mut HookRegistry) {
         .register("Asset", Arc::new(asset::AssetHook))
         .register("PurchaseInvoice", Arc::new(purchase::PurchaseInvoiceHook))
         .register("AssetMovement", Arc::new(movement::MovementHook))
+        .register("AssetVerification", Arc::new(verification::VerificationHook))
         .register("AssetValueAdjustment", Arc::new(value::AdjustmentHook))
         .register("AssetRepair", Arc::new(value::RepairHook))
         .register("AssetMaintenance", Arc::new(maintenance::PlanHook))

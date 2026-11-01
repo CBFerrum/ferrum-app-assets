@@ -624,12 +624,158 @@ async fn scenario() {
     assert_eq!((first_move["from_location"].clone(), first_move["to_location"].clone()), (json!("HQ Floor 1"), json!("HQ Floor 2")));
     assert_eq!(history["rows"][1]["to_custodian"], json!("alice@acme.test"));
 
+    // ───────────── identity facts stay editable after submit ─────────────
+    let edit = t.k.update(&manager, "Asset", laptop2, obj(json!({"serial_number": "SN-2"})), None).await;
+    assert!(matches!(edit, Err(Error::Invalid(ref m)) if m.contains("cannot be edited")), "a submitted asset is read-only: {edit:?}");
+    let details = json!({"serial_number": " SN-2 ", "manufacturer": "Dell", "model_number": "XPS 13", "warranty_expiry_date": "2026-01-14"});
+    t.k.run_action(&manager, "Asset", laptop2, "update_details", details).await.expect("edit details");
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!(
+        [&l2["serial_number"], &l2["manufacturer"], &l2["model_number"], &l2["warranty_expiry_date"], &l2["end_of_life_date"]],
+        [&json!("SN-2"), &json!("Dell"), &json!("XPS 13"), &json!("2026-01-14"), &Value::Null],
+        "trimmed, and kept"
+    );
+    t.k.run_action(&manager, "Asset", laptop2, "update_details", json!({"manufacturer": "", "end_of_life_date": "2027-12-31"})).await.expect("clear");
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!(
+        [&l2["manufacturer"], &l2["serial_number"], &l2["end_of_life_date"]],
+        [&Value::Null, &json!("SN-2"), &json!("2027-12-31")],
+        "empty clears what was there; what is left out stays"
+    );
+    let bad_date = t.k.run_action(&manager, "Asset", laptop2, "update_details", json!({"warranty_expiry_date": "soon"})).await;
+    assert!(matches!(bad_date, Err(ref e) if validation(e, "warranty_expiry_date")), "{bad_date:?}");
+    let too_long = t.k.run_action(&manager, "Asset", laptop2, "update_details", json!({"serial_number": "x".repeat(121)})).await;
+    assert!(matches!(too_long, Err(ref e) if validation(e, "120")), "{too_long:?}");
+    let by_alice = t.k.run_action(&alice, "Asset", laptop3, "update_details", json!({"serial_number": "X"})).await;
+    assert!(by_alice.is_err(), "a custodian does not rewrite the register's facts: {by_alice:?}");
+
+    // ───────────── handed out until a date; the date follows the custody ─────────────
+    let issue_to = |on: &str, due: Value| {
+        json!({"company": cid.to_string(), "purpose": "Issue", "transaction_date": on,
+               "assets": [{"asset": laptop2.to_string(), "to_custodian": "bob@acme.test", "expected_return_date": due}]})
+    };
+    let too_early = t.k.insert(&manager, "AssetMovement", obj(issue_to("2024-03-05", json!("2024-03-01")))).await;
+    assert!(matches!(too_early, Err(ref e) if validation(e, "before the day")), "{too_early:?}");
+    let on_transfer =
+        t.k.insert(
+            &manager,
+            "AssetMovement",
+            obj(json!({"company": cid.to_string(), "purpose": "Transfer", "transaction_date": "2024-03-05",
+                       "assets": [{"asset": laptop2.to_string(), "target_location": floor2.to_string(), "expected_return_date": "2024-04-01"}]})),
+        )
+        .await;
+    assert!(matches!(on_transfer, Err(ref e) if validation(e, "only an issue")), "{on_transfer:?}");
+    let out = t.insert(&manager, "AssetMovement", issue_to("2024-03-05", json!("2024-04-01"))).await;
+    t.submit(&manager, "AssetMovement", uid(&out)).await;
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!((&l2["custodian"], &l2["expected_return_date"]), (&json!("bob@acme.test"), &json!("2024-04-01")));
+    let due_back = t.list(&a, "Asset", json!([["expected_return_date", "<", "2024-04-02"]])).await;
+    assert_eq!(due_back.iter().map(uid).collect::<Vec<_>>(), vec![laptop2], "the one handed out is the one due back");
+    let trail = t
+        .report(
+            &a,
+            "asset_movement_history",
+            &[("company", cid.to_string()), ("asset", laptop2.to_string()), ("from_date", "2024-01-01".into()), ("to_date", "2024-12-31".into())],
+        )
+        .await;
+    assert_eq!(
+        (&trail["rows"][0]["to_custodian"], &trail["rows"][0]["due_back"]),
+        (&json!("bob@acme.test"), &json!("2024-04-01")),
+        "the history says when it was due back"
+    );
+    let receipt = |on: &str| json!({"company": cid.to_string(), "purpose": "Receipt", "transaction_date": on, "assets": [{"asset": laptop2.to_string(), "target_location": floor1.to_string()}]});
+    let back = uid(&t.submit(&manager, "AssetMovement", uid(&t.insert(&manager, "AssetMovement", receipt("2024-04-10")).await)).await);
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!((&l2["custodian"], &l2["expected_return_date"]), (&Value::Null, &Value::Null), "handed back: nobody holds it, nothing is due");
+    t.cancel(&manager, "AssetMovement", back).await;
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!((&l2["custodian"], &l2["expected_return_date"]), (&json!("bob@acme.test"), &json!("2024-04-01")), "undoing the receipt gives back both");
+    let handover = json!({"company": cid.to_string(), "purpose": "Transfer", "transaction_date": "2024-04-15",
+                          "assets": [{"asset": laptop2.to_string(), "target_location": floor2.to_string(), "to_custodian": "alice@acme.test"}]});
+    let handover = uid(&t.submit(&manager, "AssetMovement", uid(&t.insert(&manager, "AssetMovement", handover).await)).await);
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!((&l2["custodian"], &l2["expected_return_date"]), (&json!("alice@acme.test"), &Value::Null), "a new custodian inherits no date");
+    t.cancel(&manager, "AssetMovement", handover).await;
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!((&l2["custodian"], &l2["expected_return_date"]), (&json!("bob@acme.test"), &json!("2024-04-01")));
+    t.submit(&manager, "AssetMovement", uid(&t.insert(&manager, "AssetMovement", receipt("2024-05-01")).await)).await;
+    let l2 = t.get("Asset", laptop2).await;
+    assert_eq!((&l2["custodian"], &l2["expected_return_date"]), (&Value::Null, &Value::Null), "and it stays in the register for what follows");
+
+    // ───────────── seen in person ─────────────
+    t.update(&a, "AssetCategory", laptops, json!({"verification_interval_months": 6})).await;
+    let check = |asset: Uuid, on: &str, more: Value| {
+        let mut v = json!({"asset": asset.to_string(), "verified_on": on});
+        for (k, x) in more.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        v
+    };
+    for (what, input, needle) in [
+        ("tomorrow", check(laptop1, "2999-01-01", json!({})), "future"),
+        ("before it was bought", check(laptop1, "2022-12-31", json!({})), "bought"),
+        ("a next check before the check", check(laptop1, "2024-05-01", json!({"next_verification_date": "2024-05-01"})), "after the day"),
+        ("seen and not found", check(laptop1, "2024-05-01", json!({"result": "Not Found", "seen_at": floor1.to_string()})), "seen nowhere"),
+    ] {
+        let refused = t.k.insert(&manager, "AssetVerification", obj(input)).await;
+        assert!(matches!(refused, Err(ref e) if validation(e, needle)), "{what}: {refused:?}");
+    }
+    let by_alice = t.k.insert(&alice, "AssetVerification", obj(check(laptop1, "2024-05-01", json!({})))).await;
+    assert!(by_alice.is_err(), "checking is the asset manager's job: {by_alice:?}");
+    let v1 = t.insert(&manager, "AssetVerification", check(laptop1, "2024-05-01", json!({"seen_at": floor1.to_string(), "note": "On the desk"}))).await;
+    assert_eq!(
+        (&v1["company"], &v1["verified_by"], &v1["next_verification_date"]),
+        (&json!(cid.to_string()), &json!("manager@acme.test"), &json!("2024-11-01")),
+        "the company from the asset, the person signed in, the next check from the category (6 months)"
+    );
+    let l1 = t.get("Asset", laptop1).await;
+    assert!(l1["last_verified_date"].is_null(), "a draft check has not happened yet");
+    t.submit(&manager, "AssetVerification", uid(&v1)).await;
+    let verified = |l: &Doc| (l["last_verified_date"].clone(), l["next_verification_date"].clone(), l["verification_result"].clone());
+    assert_eq!(verified(&t.get("Asset", laptop1).await), (json!("2024-05-01"), json!("2024-11-01"), json!("Found")));
+    let lost = t.insert(&manager, "AssetVerification", check(laptop1, "2024-06-01", json!({"result": "Not Found"}))).await;
+    assert!(lost["next_verification_date"].is_null(), "an asset that cannot be found is not scheduled for a next check");
+    t.submit(&manager, "AssetVerification", uid(&lost)).await;
+    assert_eq!(verified(&t.get("Asset", laptop1).await), (json!("2024-06-01"), Value::Null, json!("Not Found")), "the latest check says so");
+    t.cancel(&manager, "AssetVerification", uid(&lost)).await;
+    assert_eq!(
+        verified(&t.get("Asset", laptop1).await),
+        (json!("2024-05-01"), json!("2024-11-01"), json!("Found")),
+        "taking a check back restores the one before"
+    );
+    let given = t.insert(&manager, "AssetVerification", check(laptop1, "2024-07-01", json!({"next_verification_date": "2025-01-15"}))).await;
+    t.submit(&manager, "AssetVerification", uid(&given)).await;
+    assert_eq!(verified(&t.get("Asset", laptop1).await), (json!("2024-07-01"), json!("2025-01-15"), json!("Found")), "a date given beats the category's");
+    let van_check = t.insert(&manager, "AssetVerification", check(van, "2024-05-02", json!({}))).await;
+    assert!(van_check["next_verification_date"].is_null(), "a category with no interval has no routine check");
+    t.submit(&manager, "AssetVerification", uid(&van_check)).await;
+    assert_eq!(verified(&t.get("Asset", van).await), (json!("2024-05-02"), Value::Null, json!("Found")));
+    let due = t.list(&a, "Asset", json!([["next_verification_date", "<=", "2025-02-01"]])).await;
+    assert_eq!(due.iter().map(uid).collect::<Vec<_>>(), vec![laptop1], "the due list holds what was scheduled and is due");
+
     // ───────────── scrap: pending depreciation first, then the write-off; undone by cancelling ─────────────
     let future =
         t.k.insert(&manager, "AssetDisposal", obj(json!({"asset": boiler.to_string(), "disposal_type": "Scrap", "disposal_date": "2999-01-01"}))).await;
     assert!(matches!(future, Err(ref e) if validation(e, "future")), "{future:?}");
+    let handed = json!({"company": cid.to_string(), "purpose": "Issue", "transaction_date": "2024-07-01",
+                        "assets": [{"asset": boiler.to_string(), "to_custodian": "bob@acme.test", "expected_return_date": "2024-09-01"}]});
+    t.submit(&manager, "AssetMovement", uid(&t.insert(&manager, "AssetMovement", handed).await)).await;
+    let watched = t
+        .insert(&manager, "AssetVerification", json!({"asset": boiler.to_string(), "verified_on": "2024-07-02", "next_verification_date": "2025-07-02"}))
+        .await;
+    t.submit(&manager, "AssetVerification", uid(&watched)).await;
+    let dates =
+        |l: &Doc| [l["expected_return_date"].clone(), l["last_verified_date"].clone(), l["verification_result"].clone(), l["next_verification_date"].clone()];
+    assert_eq!(dates(&t.get("Asset", boiler).await), [json!("2024-09-01"), json!("2024-07-02"), json!("Found"), json!("2025-07-02")]);
     let scrap = t.insert(&manager, "AssetDisposal", json!({"asset": boiler.to_string(), "disposal_type": "Scrap", "disposal_date": "2024-07-15"})).await;
     let scrap = t.submit(&manager, "AssetDisposal", uid(&scrap)).await;
+    assert_eq!(
+        dates(&t.get("Asset", boiler).await),
+        [Value::Null, json!("2024-07-02"), Value::Null, Value::Null],
+        "a scrapped asset is due nothing and found nothing, but the day it was last verified stays"
+    );
+    let after_scrap = t.k.insert(&manager, "AssetVerification", obj(json!({"asset": boiler.to_string(), "verified_on": "2024-07-20"}))).await;
+    assert!(matches!(after_scrap, Err(ref e) if validation(e, "scrapped")), "{after_scrap:?}");
     // 2023: 50000 × 351/365 / 10 = 4808.22; 2024 to Jul 15: 5000 × 197/366 = 2691.26.
     assert_eq!(
         (dec(&scrap["accumulated_depreciation"]), dec(&scrap["net_book_value"]), dec(&scrap["gain_or_loss"])),
@@ -652,6 +798,10 @@ async fn scenario() {
     t.cancel(&manager, "AssetDisposal", uid(&scrap)).await;
     let bo = t.get("Asset", boiler).await;
     assert_eq!(bo["status"], json!("Partially Depreciated"));
+    assert_eq!(dates(&bo), [json!("2024-09-01"), json!("2024-07-02"), json!("Found"), json!("2025-07-02")], "undoing the scrap brings its dates back");
+    let take_back = json!({"company": cid.to_string(), "purpose": "Receipt", "transaction_date": "2024-08-02", "assets": [{"asset": boiler.to_string(), "target_location": plant.to_string()}]});
+    t.submit(&manager, "AssetMovement", uid(&t.insert(&manager, "AssetMovement", take_back).await)).await;
+    assert!(t.get("Asset", boiler).await["expected_return_date"].is_null(), "handed back");
     let sb = schedule(&bo);
     assert_eq!(sb.len(), 11, "the plan is back");
     assert!(sb[0].2 && sb[1..].iter().all(|r| !r.2) && sb[1].1 == n("5000") && sb[10].1 == n("191.78"));
@@ -787,6 +937,7 @@ async fn scenario() {
     let due = t.report(&a, "asset_maintenance_due", &[("company", cid.to_string()), ("as_of", "2026-03-10".into()), ("days", "0".into())]).await;
     assert_eq!(due["rows"].as_array().unwrap().len(), 1);
     assert_eq!((due["rows"][0]["status"].clone(), due["rows"][0]["days_overdue"].clone()), (json!("Overdue"), json!(7)));
+    assert_eq!(due["rows"][0]["asset_id"], json!(laptop3.to_string()), "the row says which asset it is for");
     let bobs = t.report(&bob, "asset_maintenance_due", &[("company", cid.to_string()), ("as_of", "2026-03-10".into())]).await;
     assert_eq!(bobs["rows"].as_array().unwrap().len(), 1, "the assignee sees their task");
     let alices = t.report(&alice, "asset_maintenance_due", &[("company", cid.to_string()), ("as_of", "2026-03-10".into())]).await;
@@ -807,8 +958,13 @@ async fn scenario() {
     let booked = schedule(&t.get("Asset", spare).await).iter().filter(|r| r.2).count();
     assert!(booked >= 21, "January 2025 to at least September 2026");
     let dep_before = t.gl("Depreciation").await;
+    let spare_check =
+        t.insert(&manager, "AssetVerification", json!({"asset": spare.to_string(), "verified_on": "2025-02-01", "next_verification_date": "2026-02-01"})).await;
+    t.submit(&manager, "AssetVerification", uid(&spare_check)).await;
+    assert_eq!(t.get("Asset", spare).await["next_verification_date"], json!("2026-02-01"));
     t.cancel(&a, "Asset", spare).await;
     let sp = t.get("Asset", spare).await;
+    assert!(sp["next_verification_date"].is_null(), "a cancelled asset is due no check");
     assert_eq!((sp["status"].clone(), dec(&sp["accumulated_depreciation"])), (json!("Cancelled"), Decimal::ZERO));
     assert_eq!(dep_before - t.gl("Depreciation").await, n("10") * Decimal::from(booked as i64), "its depreciation is reversed");
     let cancelled_entries =

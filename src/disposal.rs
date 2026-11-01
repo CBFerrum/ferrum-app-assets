@@ -189,6 +189,7 @@ impl DocHook for DisposalHook {
         hc.kernel.set_values_tx(&sys(hc.ctx), hc.tx, "AssetDisposal", me, v).await?;
         set(&mut current, "disposal", me.to_string());
         set(&mut current, "disposal_date", on.to_string());
+        asset::carry_dates(hc.tx, hc.ctx.tenant, &mut current, false).await?;
         asset::save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())
     }
@@ -224,6 +225,7 @@ impl DocHook for DisposalHook {
         asset::restore_after_disposal(hc.kernel, hc.ctx, hc.tx, &mut current, me, &snapshot).await?;
         set(&mut current, "disposal", Value::Null);
         set(&mut current, "disposal_date", Value::Null);
+        asset::carry_dates(hc.tx, hc.ctx.tenant, &mut current, true).await?;
         asset::save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())
     }

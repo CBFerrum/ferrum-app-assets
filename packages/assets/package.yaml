@@ -38,7 +38,7 @@ modules:
     label: Assets
     icon: building
     order: 55
-    items: [Asset, AssetMovement, AssetValueAdjustment, AssetRepair, AssetMaintenance, AssetMaintenanceLog, AssetDisposal, AssetCategory, Location,
+    items: [Asset, AssetMovement, AssetVerification, AssetValueAdjustment, AssetRepair, AssetMaintenance, AssetMaintenanceLog, AssetDisposal, AssetCategory, Location,
             FinanceBook, report:fixed_asset_register, report:asset_depreciation_schedule, report:asset_movement_history, report:asset_maintenance_due,
             report:asset_disposal_gain_loss]
 
@@ -51,6 +51,7 @@ roles:
       - {entity: Location, read: true, write: true, create: true, delete: true, export: true, import: true}
       - {entity: FinanceBook, read: true, write: true, create: true, delete: true}
       - {entity: AssetMovement, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
+      - {entity: AssetVerification, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
       - {entity: AssetValueAdjustment, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
       - {entity: AssetRepair, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
       - {entity: AssetMaintenance, read: true, write: true, create: true, delete: true, export: true}
@@ -90,6 +91,7 @@ roles:
       - {entity: Location, read: true}
       - {entity: FinanceBook, read: true}
       - {entity: AssetMovement, read: true}
+      - {entity: AssetVerification, read: true}
       - {entity: AssetValueAdjustment, read: true, export: true}
       - {entity: AssetRepair, read: true}
       - {entity: AssetMaintenance, read: true}
@@ -98,6 +100,7 @@ roles:
 personal_data:
   - {entity: Asset, match: custodian, erase: [custodian]}
   - {entity: AssetMaintenanceLog, match: assigned_to, erase: [assigned_to]}
+  - {entity: AssetVerification, match: verified_by, erase: [verified_by]}
 handover:
   - {entity: Asset, field: custodian, where: {status: [Draft, Submitted, Partially Depreciated, Fully Depreciated, In Maintenance, Out of Order]}}
   - {entity: AssetMaintenance, field: maintenance_manager}

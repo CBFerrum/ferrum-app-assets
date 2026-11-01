@@ -43,6 +43,7 @@
     - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Manual], required: true, default: Straight Line, in_list: true, in_filter: true}
     - {name: total_number_of_depreciations, type: int, required: true, min: 1, max: 1200, in_list: true, description: Useful life in depreciation periods}
     - {name: frequency_of_depreciation, type: int, required: true, min: 1, max: 120, default: 12, label: Frequency of Depreciation (Months), in_list: true}
+    - {name: verification_interval_months, type: int, min: 1, max: 120, label: Verify Every (Months), in_list: true, description: How often assets of this category are physically checked; empty means no routine check}
     - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year), visible_if: "doc.depreciation_method == 'Written Down Value'", required_if: "doc.depreciation_method == 'Written Down Value'"}
     - name: start_convention
       type: select
@@ -78,7 +79,7 @@
   company_scoped: true
   title_field: asset_name
   numbering: {template: "AST-{YYYY}-{seq:5}", date_field: purchase_date}
-  search_fields: [asset_name, custodian]
+  search_fields: [asset_name, custodian, serial_number]
   owner_fields: [custodian]
   fields:
     - {name: asset_name, type: data, required: true, in_list: true, description: Defaults to the item name}
@@ -91,6 +92,11 @@
     - {name: cost_center, type: link, to: CostCenter, link_filters: {is_group: false}, description: Depreciation is booked to it (default the company's depreciation cost center)}
     - {name: finance_book, type: link, to: FinanceBook, in_filter: true}
     - {name: asset_quantity, type: int, required: true, default: 1, min: 1}
+    - {name: serial_number, type: data, max_length: 120, in_filter: true, description: What the maker stamped on it; stays editable after the asset is submitted (Edit Details)}
+    - {name: manufacturer, type: data, max_length: 120}
+    - {name: model_number, type: data, max_length: 120, label: Model}
+    - {name: warranty_expiry_date, type: date, in_filter: true, label: Warranty Ends}
+    - {name: end_of_life_date, type: date, label: End of Life}
     - {name: purchase_date, type: date, required: true, in_filter: true}
     - {name: available_for_use_date, type: date, required: true, description: Depreciation starts here (default the purchase date)}
     - {name: gross_purchase_amount, type: currency, currency: currency, required: true, min: "0"}
@@ -117,18 +123,35 @@
     - {name: accumulated_depreciation, type: currency, currency: currency, read_only: true, no_copy: true}
     - {name: value_after_depreciation, type: currency, currency: currency, read_only: true, no_copy: true, in_list: true, label: Net Book Value}
     - {name: next_depreciation_date, type: date, read_only: true, no_copy: true}
+    - {name: expected_return_date, type: date, read_only: true, no_copy: true, in_filter: true, label: Due Back, description: When the custodian is to hand it back (set by the movement that hands it out)}
+    - {name: last_verified_date, type: date, read_only: true, no_copy: true, in_filter: true, label: Last Verified}
+    - {name: next_verification_date, type: date, read_only: true, no_copy: true, in_filter: true, label: Next Verification}
+    - {name: verification_result, type: select, options: [Found, Not Found], read_only: true, no_copy: true, in_filter: true, label: Last Check Found, description: What the latest standing verification found}
     - {name: status, type: select, options: [Draft, Submitted, Partially Depreciated, Fully Depreciated, In Maintenance, Out of Order, Sold, Scrapped, Cancelled], default: Draft, read_only: true, no_copy: true, in_list: true, in_filter: true}
     - {name: disposal, type: link, to: AssetDisposal, read_only: true, no_copy: true}
     - {name: disposal_date, type: date, read_only: true, no_copy: true}
     - {name: description, type: text}
   form:
-    - {label: Asset, fields: [asset_name, item, asset_category, company, currency, location, custodian, cost_center, finance_book, asset_quantity, status]}
+    - {label: Asset, fields: [asset_name, item, asset_category, company, currency, location, custodian, expected_return_date, cost_center, finance_book, asset_quantity, status]}
+    - {label: Identity, fields: [serial_number, manufacturer, model_number, warranty_expiry_date, end_of_life_date]}
     - {label: Purchase, fields: [purchase_date, available_for_use_date, gross_purchase_amount, is_existing_asset, purchase_invoice, opening_accumulated_depreciation, opening_number_of_booked_depreciations]}
     - {label: Depreciation, fields: [calculate_depreciation, depreciation_method, total_number_of_depreciations, frequency_of_depreciation, rate_of_depreciation, start_convention, depreciation_start_date, salvage_value, schedule]}
     - {label: Values, fields: [total_asset_cost, additional_asset_cost, value_adjustments, accumulated_depreciation, value_after_depreciation, next_depreciation_date, disposal, disposal_date]}
+    - {label: Verification, fields: [last_verified_date, next_verification_date, verification_result]}
     - {label: Accounts, collapsible: true, fields: [fixed_asset_account, accumulated_depreciation_account, depreciation_expense_account]}
     - {label: More, collapsible: true, fields: [description]}
   rules:
     - {name: positive_cost, check: "doc.gross_purchase_amount > 0.0", message: "Gross purchase amount must be greater than zero"}
     - {name: available_after_purchase, check: "doc.available_for_use_date == null || doc.purchase_date == null || doc.available_for_use_date >= doc.purchase_date", message: "The available-for-use date cannot be before the purchase date"}
+  actions:
+    - name: update_details
+      label: Edit Details
+      docstatus: [1]
+      permission: write
+      params:
+        - {name: serial_number, label: Serial Number, type: data}
+        - {name: manufacturer, label: Manufacturer, type: data}
+        - {name: model_number, label: Model, type: data}
+        - {name: warranty_expiry_date, label: Warranty Ends, type: date}
+        - {name: end_of_life_date, label: End of Life, type: date}
   list: {columns: [number, asset_name, asset_category, location, value_after_depreciation, status], sort: created_at desc}
