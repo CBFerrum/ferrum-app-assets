@@ -42,7 +42,11 @@ async fn lock(k: &Kernel, ctx: &Ctx, tx: &mut Tx, l: &Lock) -> Result<Value> {
         return Err(Error::field("reason", "say why"));
     }
     let sctx = sys(ctx);
-    let open: Option<Uuid> = sqlx::query_scalar("select id from e_equipment_lockout where tenant_id = $1 and device = $2 and status = 'Locked' limit 1").bind(ctx.tenant).bind(l.device).fetch_optional(&mut **tx).await?;
+    let open: Option<Uuid> = sqlx::query_scalar("select id from e_equipment_lockout where tenant_id = $1 and device = $2 and status = 'Locked' limit 1")
+        .bind(ctx.tenant)
+        .bind(l.device)
+        .fetch_optional(&mut **tx)
+        .await?;
     if open.is_some() {
         return Err(Error::invalid("this equipment is already locked out"));
     }
@@ -73,9 +77,20 @@ async fn return_to_service(k: &Kernel, ctx: &Ctx, tx: &mut Tx, lockout: Uuid, no
             return Err(Error::invalid("the work on this equipment has not been recorded as done"));
         }
     }
-    k.set_values_tx(&sctx, tx, "EquipmentLockout", lockout, values(json!({"status": "Returned", "returned_by": ctx.email, "returned_at": Utc::now().to_rfc3339(), "return_note": note}))).await?;
+    k.set_values_tx(
+        &sctx,
+        tx,
+        "EquipmentLockout",
+        lockout,
+        values(json!({"status": "Returned", "returned_by": ctx.email, "returned_at": Utc::now().to_rfc3339(), "return_note": note})),
+    )
+    .await?;
     let device = id(&doc, "device").ok_or_else(|| Error::internal("a lockout without a device"))?;
-    let other: Option<Uuid> = sqlx::query_scalar("select id from e_equipment_lockout where tenant_id = $1 and device = $2 and status = 'Locked' limit 1").bind(ctx.tenant).bind(device).fetch_optional(&mut **tx).await?;
+    let other: Option<Uuid> = sqlx::query_scalar("select id from e_equipment_lockout where tenant_id = $1 and device = $2 and status = 'Locked' limit 1")
+        .bind(ctx.tenant)
+        .bind(device)
+        .fetch_optional(&mut **tx)
+        .await?;
     if other.is_none() {
         devices::set_lifecycle_tx(k, &sctx, tx, device, Lifecycle::Active, note).await?;
     }
@@ -97,7 +112,14 @@ async fn repaired(k: &Kernel, ctx: &Ctx, tx: &mut Tx, request: Uuid, r: &Repaire
     if r.work_done.trim().is_empty() {
         return Err(Error::field("work_done", "say what was done"));
     }
-    k.set_values_tx(&sys(ctx), tx, "MaintenanceRequest", request, values(json!({"status": "Repaired", "work_done": r.work_done, "failure_code": r.failure_code, "root_cause": r.root_cause}))).await
+    k.set_values_tx(
+        &sys(ctx),
+        tx,
+        "MaintenanceRequest",
+        request,
+        values(json!({"status": "Repaired", "work_done": r.work_done, "failure_code": r.failure_code, "root_cause": r.root_cause})),
+    )
+    .await
 }
 
 async fn open_request(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: Value) -> Result<()> {
