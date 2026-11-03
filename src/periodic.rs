@@ -50,7 +50,8 @@ pub(crate) async fn depreciate(k: &Kernel, ctx: &Ctx) -> Result<usize> {
     let assets: Vec<Uuid> = {
         let mut tx = k.db.tenant_tx(ctx.tenant).await?;
         let v = sqlx::query_scalar(
-            "select a.id from e_asset a join e_asset__schedule s on s.tenant_id = a.tenant_id and s.parent_id = a.id \
+            "select a.id from e_asset a join (select tenant_id, parent_id, schedule_date, booked from e_asset__schedule \
+               union all select tenant_id, parent_id, schedule_date, booked from e_asset__book_schedule) s on s.tenant_id = a.tenant_id and s.parent_id = a.id \
              where a.tenant_id = $1 and a.docstatus = 1 and a.disposal is null and not s.booked and s.schedule_date <= $2 \
              group by a.id order by min(s.schedule_date), a.id limit 200",
         )
@@ -105,21 +106,25 @@ async fn record_failure(k: &Kernel, ctx: &Ctx, asset: Uuid, e: &Error) {
     tracing::warn!(tenant = %ctx.tenant, %asset, "depreciation could not be booked: {why}");
     let done: Result<()> = async {
         let mut tx = k.db.tenant_tx(ctx.tenant).await?;
-        let row: Option<(Uuid, Option<String>, String)> = sqlx::query_as(
-            "select s.id, s.posting_error, coalesce(a.number, a.id::text) from e_asset__schedule s join e_asset a on a.tenant_id = s.tenant_id and a.id = s.parent_id \
-             where s.tenant_id = $1 and s.parent_id = $2 and not s.booked order by s.schedule_date limit 1",
+        // The row that failed: the earliest unbooked one of any book (the asset's own first).
+        let row: Option<(String, Uuid, Option<String>, String)> = sqlx::query_as(
+            "select s.tbl, s.id, s.posting_error, coalesce(a.number, a.id::text) from ( \
+               select 'schedule' as tbl, 0 as k, id, parent_id, tenant_id, posting_error, schedule_date, booked from e_asset__schedule \
+               union all select 'book_schedule', 1, id, parent_id, tenant_id, posting_error, schedule_date, booked from e_asset__book_schedule) s \
+             join e_asset a on a.tenant_id = s.tenant_id and a.id = s.parent_id \
+             where s.tenant_id = $1 and s.parent_id = $2 and not s.booked order by s.schedule_date, s.k limit 1",
         )
         .bind(ctx.tenant)
         .bind(asset)
         .fetch_optional(&mut *tx)
         .await?;
-        let Some((row, previous, number)) = row else { return Ok(()) };
+        let Some((table, row, previous, number)) = row else { return Ok(()) };
         if previous.as_deref() == Some(why.as_str()) {
             return Ok(());
         }
         let mut v = Doc::new();
         v.insert("posting_error".into(), json!(why));
-        k.set_child_values_tx(ctx, &mut tx, "Asset", "schedule", row, v).await?;
+        k.set_child_values_tx(ctx, &mut tx, "Asset", &table, row, v).await?;
         let managers: Vec<Uuid> = sqlx::query_scalar(
             "select u.id from app_user u join user_role r on r.tenant_id = u.tenant_id and r.user_id = u.id \
              where u.tenant_id = $1 and r.role = 'Asset Manager' and u.is_active",

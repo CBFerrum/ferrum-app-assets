@@ -1,5 +1,28 @@
 # Changelog
 
+## Assets 0.3.0: finance books keep their own values
+
+What finance books are mostly for: an asset depreciated one way for IFRS and another for tax
+(FERRUM-ASSETS-002).
+
+- An asset lists the finance books that depreciate it their own way, each with its method, number of
+  depreciations, frequency, rate and salvage value (and, for an existing asset, what it had already
+  depreciated); what a book leaves empty is the asset's. Each gets a schedule of its own, generated
+  like the asset's and booked by the same upkeep.
+- The asset's own depreciation is in every book, as an entry without a book always is. In a book
+  that keeps its own, each such entry is taken out again and the book's own is booked instead, so
+  the book shows its depreciation alone. Every entry is a journal entry of its book.
+- A value adjustment can change one book alone (an impairment under IFRS, say): its entry is that
+  book's and only that book's remaining depreciation is re-planned.
+- A sale or scrap depreciates every book up to its date; each book's own entry clears what it
+  depreciated (or adjusted) beyond the common books into its gain or loss, and the disposal records
+  each book's net book value and gain. Cancelling it undoes all of that.
+- The fixed asset register and the depreciation schedule take a finance book and show its values
+  for the assets it depreciates its own way, and the common values for the rest.
+
+The asset's single Finance Book field, a label, is gone: an asset is in every book, and in the books
+it lists with values of their own. Needs ERP 0.6.0 or later.
+
 ## Assets 0.2.1: finance books are accounting's
 
 ERP 0.6.0 keeps finance books for parallel accounting, as entries of their own in each book. Assets'

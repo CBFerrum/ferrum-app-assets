@@ -144,12 +144,21 @@ async fn register(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p: &Pa
              and r.docstatus = 1 and r.capitalize_repair_cost and r.completion_date <= ")
         .push_bind(as_of)
         .push("), 0) + coalesce((select sum(v.difference_amount) from e_asset_value_adjustment v where v.tenant_id = a.tenant_id and v.asset = a.id and v.docstatus = 1 \
-               and v.adjustment_date <= ")
+               and (v.finance_book is null or v.finance_book = ")
+        .push_bind(book)
+        .push(") and v.adjustment_date <= ")
         .push_bind(as_of)
-        .push("), 0) as cost, coalesce(a.opening_accumulated_depreciation, 0) + coalesce((select sum(s.depreciation_amount) from e_asset__schedule s \
+        // In a finance book that keeps its own depreciation of the asset, that depreciation.
+        .push("), 0) as cost, case when fb.id is null then coalesce(a.opening_accumulated_depreciation, 0) + coalesce((select sum(s.depreciation_amount) from e_asset__schedule s \
                where s.tenant_id = a.tenant_id and s.parent_id = a.id and s.booked and s.schedule_date <= ")
         .push_bind(as_of)
-        .push("), 0) as accumulated from e_asset a left join e_asset_category c on c.tenant_id = a.tenant_id and c.id = a.asset_category where a.tenant_id = ")
+        .push("), 0) else coalesce(fb.opening_accumulated_depreciation, a.opening_accumulated_depreciation, 0) + coalesce((select sum(s.depreciation_amount) \
+               from e_asset__book_schedule s where s.tenant_id = a.tenant_id and s.parent_id = a.id and s.finance_book = fb.finance_book and s.booked and s.schedule_date <= ")
+        .push_bind(as_of)
+        .push("), 0) end as accumulated from e_asset a left join e_asset_category c on c.tenant_id = a.tenant_id and c.id = a.asset_category \
+               left join e_asset__finance_books fb on fb.tenant_id = a.tenant_id and fb.parent_id = a.id and fb.finance_book = ")
+        .push_bind(book)
+        .push(" where a.tenant_id = ")
         .push_bind(ctx.tenant)
         .push(" and a.company = ")
         .push_bind(co.id)
@@ -160,9 +169,6 @@ async fn register(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p: &Pa
         .push(")");
     if let Some(c) = category {
         qb.push(" and a.asset_category = ").push_bind(c);
-    }
-    if let Some(b) = book {
-        qb.push(" and a.finance_book = ").push_bind(b);
     }
     scoped(k, ctx, &mut qb, "Asset", "a")?;
     qb.push(") x left join e_location l on l.tenant_id = ").push_bind(ctx.tenant).push(" and l.id = x.location_id");
@@ -242,13 +248,24 @@ struct ScheduleRow {
     posting_error: Option<String>,
 }
 
-/// Every schedule row in the period: planned against booked, with what is overdue.
+/// Every schedule row in the period: planned against booked, with what is overdue. In a finance
+/// book, the book's own rows of assets it depreciates its own way.
 async fn depreciation(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p: &Params<'_>) -> Result<Value> {
     let (from, to) = period(p, co)?;
+    let book = p.uuid("finance_book")?;
     let mut qb = QueryBuilder::<Postgres>::new(
         "select a.id as asset_id, a.number as asset, a.asset_name, c.category_name as category, s.schedule_date, s.depreciation_amount as amount, \
          s.accumulated_depreciation as accumulated, s.booked, je.number as journal_entry, s.disposal is not null as at_disposal, s.posting_error \
-         from e_asset__schedule s join e_asset a on a.tenant_id = s.tenant_id and a.id = s.parent_id \
+         from (select r.tenant_id, r.parent_id, r.idx, r.schedule_date, r.depreciation_amount, r.accumulated_depreciation, r.booked, r.journal_entry, r.disposal, \
+         r.posting_error from e_asset__schedule r where not exists (select 1 from e_asset__finance_books fb where fb.tenant_id = r.tenant_id \
+         and fb.parent_id = r.parent_id and fb.finance_book = ",
+    );
+    qb.push_bind(book).push(
+        ") union all select r.tenant_id, r.parent_id, r.idx, r.schedule_date, r.depreciation_amount, r.accumulated_depreciation, r.booked, r.journal_entry, \
+         r.disposal, r.posting_error from e_asset__book_schedule r where r.finance_book = ",
+    );
+    qb.push_bind(book).push(
+        ") s join e_asset a on a.tenant_id = s.tenant_id and a.id = s.parent_id \
          left join e_asset_category c on c.tenant_id = a.tenant_id and c.id = a.asset_category \
          left join e_journal_entry je on je.tenant_id = s.tenant_id and je.id = s.journal_entry where s.tenant_id = ",
     );
@@ -259,9 +276,6 @@ async fn depreciation(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p:
     }
     if let Some(c) = p.uuid("asset_category")? {
         qb.push(" and a.asset_category = ").push_bind(c);
-    }
-    if let Some(b) = p.uuid("finance_book")? {
-        qb.push(" and a.finance_book = ").push_bind(b);
     }
     scoped(k, ctx, &mut qb, "Asset", "a")?;
     qb.push(" order by s.schedule_date, a.number, s.idx limit ").push_bind(MAX_ROWS + 1);
