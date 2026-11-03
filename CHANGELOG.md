@@ -1,5 +1,12 @@
 # Changelog
 
+## Assets 0.2.1: finance books are accounting's
+
+ERP 0.6.0 keeps finance books for parallel accounting, as entries of their own in each book. Assets'
+own Finance Book, a label until now, is that one: Assets no longer defines it, the field name and the
+records stay as they were, and an asset names a book as before. Install it with ERP 0.6.0 or later:
+the two define the book together otherwise, and a server holding both would not start.
+
 ## Assets Operations 0.1.0
 
 A connector between Assets and Operations, for maintaining equipment that is also on the floor: meters
