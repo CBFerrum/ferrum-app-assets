@@ -1171,6 +1171,73 @@ async fn scenario() {
     assert_eq!(amounts(&l2), [n("500"), n("500")], "the common books' manual plan is untouched");
     assert_eq!(books_of(&l2).iter().map(|r| r.1).collect::<Vec<_>>(), [n("300"), n("300")], "the tax book spreads its 600");
 
+    // ───────────── a repair that uses parts and adds a year ─────────────
+    // A compressor of 4,000 from 2025: four years in the common books, two in the tax book. Mended
+    // in June 2025 for 300 and two belts from stock (100 each); the 500 is capitalized and adds a
+    // year: 4,500 over five years (900) and over three in the tax book (1,500).
+    let belt = uid(&t
+        .insert(&a, "Item", json!({"item_code": "BELT", "item_name": "belt", "item_group": products["id"], "stock_uom": nos["id"], "is_stock_item": true}))
+        .await);
+    let stores = uid(&t.find_one("Warehouse", json!({"warehouse_name": "Stores", "company": cid.to_string()})).await);
+    let receipt = json!({"company": cid.to_string(), "purpose": "Material Receipt", "posting_date": "2025-01-01",
+                         "items": [{"item": belt.to_string(), "target_warehouse": stores.to_string(), "qty": "5", "basic_rate": "100", "expense_account": opening_equity.to_string()}]});
+    t.submit(&a, "StockEntry", uid(&t.insert(&a, "StockEntry", receipt).await)).await;
+    let compressor = t
+        .insert(
+            &a,
+            "Asset",
+            json!({"item": press_item.to_string(), "asset_name": "Compressor", "company": cid.to_string(), "location": plant.to_string(), "is_existing_asset": true,
+                   "purchase_date": "2025-01-01", "gross_purchase_amount": "4000", "depreciation_method": "Straight Line", "total_number_of_depreciations": 4,
+                   "frequency_of_depreciation": 12, "start_convention": "Full First Period",
+                   "finance_books": [{"finance_book": tax.to_string(), "total_number_of_depreciations": 2}]}),
+        )
+        .await;
+    let compressor = uid(&compressor);
+    t.submit(&manager, "Asset", compressor).await;
+    let mend = |months: i64| {
+        json!({"asset": compressor.to_string(), "failure_date": "2025-06-01", "repair_status": "Completed", "completion_date": "2025-06-30",
+               "repair_cost": "300", "capitalize_repair_cost": true, "expense_account": admin_expenses.to_string(), "increase_in_asset_life": months,
+               "consumed_items": [{"item": belt.to_string(), "warehouse": stores.to_string(), "qty": "2"}]})
+    };
+    let odd = t.k.insert(&manager, "AssetRepair", obj(mend(18))).await;
+    assert!(matches!(odd, Err(ref e) if validation(e, "whole number")), "18 months is not whole years: {odd:?}");
+    // Six months fit a pump's half years but not its tax book's years.
+    let pump = t
+        .insert(
+            &a,
+            "Asset",
+            json!({"item": press_item.to_string(), "asset_name": "Pump", "company": cid.to_string(), "location": plant.to_string(), "is_existing_asset": true,
+                   "purchase_date": "2025-01-01", "gross_purchase_amount": "1000", "depreciation_method": "Straight Line", "total_number_of_depreciations": 4,
+                   "frequency_of_depreciation": 6, "start_convention": "Full First Period",
+                   "finance_books": [{"finance_book": tax.to_string(), "total_number_of_depreciations": 2, "frequency_of_depreciation": 12}]}),
+        )
+        .await;
+    t.submit(&manager, "Asset", uid(&pump)).await;
+    let mut half = mend(6);
+    half["asset"] = json!(pump["id"]);
+    half["consumed_items"] = json!([]);
+    let half = t.k.insert(&manager, "AssetRepair", obj(half)).await;
+    assert!(matches!(half, Err(ref e) if validation(e, "finance book's 12-month")), "{half:?}");
+    let repair = uid(&t.insert(&manager, "AssetRepair", mend(12)).await);
+    let repair_doc = t.submit(&manager, "AssetRepair", repair).await;
+    assert_eq!((dec(&repair_doc["parts_cost"]), dec(&repair_doc["total_repair_cost"])), (n("200"), n("500")));
+    assert_eq!(dec(&rows(&repair_doc, "consumed_items")[0]["amount"]), n("200"));
+    let issue = t.get("StockEntry", repair_doc["stock_entry"].as_str().unwrap().parse().unwrap()).await;
+    assert_eq!((issue["purpose"].clone(), issue["docstatus"].clone()), (json!("Material Issue"), json!(1)));
+    let c = t.get("Asset", compressor).await;
+    assert_eq!((c["total_number_of_depreciations"].clone(), rows(&c, "finance_books")[0]["total_number_of_depreciations"].clone()), (json!(5), json!(3)));
+    assert_eq!(dec(&c["total_asset_cost"]), n("4500"));
+    assert_eq!(amounts(&c), [n("900"); 5]);
+    assert_eq!(books_of(&c).iter().map(|r| r.1).collect::<Vec<_>>(), [n("1500"); 3]);
+    assert_eq!(t.gl_for("Plant and Machinery", &[repair]).await, n("500"), "the repair and its parts go into the asset");
+    // Undone: the year, the cost and the parts all go back.
+    t.cancel(&manager, "AssetRepair", repair).await;
+    let c = t.get("Asset", compressor).await;
+    assert_eq!((c["total_number_of_depreciations"].clone(), rows(&c, "finance_books")[0]["total_number_of_depreciations"].clone()), (json!(4), json!(2)));
+    assert_eq!(amounts(&c), [n("1000"); 4]);
+    assert_eq!(books_of(&c).iter().map(|r| r.1).collect::<Vec<_>>(), [n("2000"); 2]);
+    assert_eq!(t.get("StockEntry", issue["id"].as_str().unwrap().parse().unwrap()).await["docstatus"], json!(2), "the parts went back to stock");
+
     // ───────────── the books ─────────────
     let tb = t.report(&a, "trial_balance", &[("company", cid.to_string()), ("from_date", "2019-01-01".into()), ("to_date", today.clone())]).await;
     assert_eq!(tb["meta"]["balanced"], json!(true), "{}", tb["totals"]);

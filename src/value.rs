@@ -8,10 +8,10 @@ use crate::setup::check_account;
 use crate::{check_places, named};
 use async_trait::async_trait;
 use ferrum_app_erp::ledger::{self, Entry, Line};
-use ferrum_domain::util::{b, company, d, get, id, money, rows, s, set, sys};
+use ferrum_domain::util::{b, company, d, elevated, get, id, money, rows, s, set, sys};
 use ferrum_kernel::{Doc, DocHook, Error, FieldError, HookCtx, Result};
 use rust_decimal::Decimal;
-use serde_json::Value;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// The asset a document refers to, read with the caller's own permissions (a user only acts on
@@ -199,8 +199,46 @@ async fn replan(hc: &mut HookCtx<'_>, current: &mut Doc, book: Book, change: Dec
 
 pub struct RepairHook;
 
-fn capitalized(doc: &Doc) -> bool {
-    s(doc, "repair_status") == Some("Completed") && b(doc, "capitalize_repair_cost") && d(doc, "repair_cost") > Decimal::ZERO
+/// A completed repair whose cost (with the parts it used: `parts`) goes into the asset.
+fn capitalized(doc: &Doc, parts: Decimal) -> bool {
+    s(doc, "repair_status") == Some("Completed") && b(doc, "capitalize_repair_cost") && d(doc, "repair_cost") + parts > Decimal::ZERO
+}
+
+/// Takes a repair's parts from stock in one material issue on its completion date, booked to the
+/// repair's expense account, and records what they were worth and the repair's whole cost.
+async fn issue_parts(hc: &mut HookCtx<'_>, doc: &Doc) -> Result<Decimal> {
+    let me = id(doc, "id").ok_or_else(|| Error::internal("repair without id"))?;
+    let parts = rows(doc, "consumed_items");
+    let mut total = Decimal::ZERO;
+    let mut v = Doc::new();
+    if !parts.is_empty() {
+        let on = day(doc, "completion_date").or_else(|| day(doc, "failure_date")).ok_or_else(|| Error::field("completion_date", "is required"))?;
+        let account = id(doc, "expense_account").ok_or_else(|| Error::field("expense_account", "is required for the parts"))?;
+        let cc = id(doc, "cost_center").map(|c| c.to_string());
+        let items: Vec<Value> = parts
+            .iter()
+            .map(|p| json!({"item": p.get("item"), "source_warehouse": p.get("warehouse"), "qty": p.get("qty"), "expense_account": account.to_string(), "cost_center": cc}))
+            .collect();
+        let input = json!({"company": doc.get("company"), "purpose": "Material Issue", "posting_date": on.to_string(), "remarks": format!("Parts for repair {}", named(doc)), "items": items});
+        let engine = elevated(hc.ctx);
+        let se = hc.kernel.insert_tx(&engine, hc.tx, "StockEntry", input.as_object().cloned().unwrap_or_default()).await?;
+        let se = id(&se, "id").ok_or_else(|| Error::internal("stock entry without id"))?;
+        hc.kernel.submit_tx(&engine, hc.tx, "StockEntry", se, None).await?;
+        let issued = hc.kernel.get_tx(&sys(hc.ctx), hc.tx, "StockEntry", se, false).await?;
+        for (p, line) in parts.iter().zip(rows(&issued, "items")) {
+            if let Some(row) = id(p, "id") {
+                let mut w = Doc::new();
+                w.insert("amount".into(), money(d(&line, "amount")));
+                hc.kernel.set_child_values_tx(&sys(hc.ctx), hc.tx, "AssetRepair", "consumed_items", row, w).await?;
+            }
+        }
+        total = d(&issued, "total_amount");
+        v.insert("stock_entry".into(), json!(se.to_string()));
+    }
+    v.insert("parts_cost".into(), money(total));
+    v.insert("total_repair_cost".into(), money(d(doc, "repair_cost") + total));
+    hc.kernel.set_values_tx(&sys(hc.ctx), hc.tx, "AssetRepair", me, v).await?;
+    Ok(total)
 }
 
 #[async_trait]
@@ -249,6 +287,16 @@ impl DocHook for RepairHook {
                 return Err(Error::field("purchase_invoice", "must be a submitted invoice of the asset's company"));
             }
         }
+        // The life it adds must fit every book's periods; the parts come from the company's stock.
+        asset::extend_life(&mut current.clone(), crate::int(doc, "increase_in_asset_life"))?;
+        for (i, p) in rows(doc, "consumed_items").iter().enumerate() {
+            if let Some(w) = id(p, "warehouse") {
+                let wh = get(hc.kernel, hc.ctx, hc.tx, "Warehouse", w).await?;
+                if id(&wh, "company") != Some(co.id) {
+                    return Err(Error::Validation(vec![FieldError::new("warehouse", "is not a warehouse of the asset's company").in_row("consumed_items", i)]));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -269,7 +317,8 @@ impl DocHook for RepairHook {
 
     async fn on_submit(&self, hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
         let a = id(doc, "asset").ok_or_else(|| Error::field("asset", "is required"))?;
-        if !capitalized(doc) {
+        let parts = issue_parts(hc, doc).await?;
+        if !capitalized(doc, parts) {
             return asset::refresh(hc.kernel, hc.ctx, hc.tx, a, None).await;
         }
         let on = day(doc, "completion_date").ok_or_else(|| Error::field("completion_date", "is required"))?;
@@ -277,16 +326,17 @@ impl DocHook for RepairHook {
         in_service(&current)?;
         let co = company(hc.kernel, hc.ctx, hc.tx, id(&current, "company").unwrap_or_default()).await?;
         asset::book_until(hc.kernel, hc.ctx, hc.tx, &mut current, on).await?;
-        let cost = d(doc, "repair_cost");
+        let cost = d(doc, "repair_cost") + parts;
         let other = id(doc, "expense_account").ok_or_else(|| Error::field("expense_account", "is required"))?;
         post_change(hc, doc, &current, on, cost, other, format!("Capitalized repair of {}", named(&current)), None).await?;
+        asset::extend_life(&mut current, crate::int(doc, "increase_in_asset_life"))?;
         asset::replan(hc.tx, hc.ctx, &mut current, cost, co.precision).await?;
         asset::save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())
     }
 
     async fn before_cancel(&self, hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
-        if capitalized(doc) {
+        if capitalized(doc, d(doc, "parts_cost")) {
             let current = get(hc.kernel, hc.ctx, hc.tx, "Asset", id(doc, "asset").unwrap_or_default()).await?;
             in_service(&current)?;
         }
@@ -295,14 +345,18 @@ impl DocHook for RepairHook {
 
     async fn on_cancel(&self, hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
         let a = id(doc, "asset").ok_or_else(|| Error::field("asset", "is required"))?;
-        if !capitalized(doc) {
+        if let Some(se) = id(doc, "stock_entry") {
+            hc.kernel.cancel_tx(&elevated(hc.ctx), hc.tx, "StockEntry", se, None).await?;
+        }
+        if !capitalized(doc, d(doc, "parts_cost")) {
             return asset::refresh(hc.kernel, hc.ctx, hc.tx, a, None).await;
         }
         let me = id(doc, "id").ok_or_else(|| Error::internal("repair without id"))?;
         let (mut current, old) = asset::open(hc.kernel, hc.ctx, hc.tx, a).await?;
         let co = company(hc.kernel, hc.ctx, hc.tx, id(&current, "company").unwrap_or_default()).await?;
         ledger::reverse(hc.tx, hc.ctx, "AssetRepair", me, hc.ctx.today(), co.precision).await?;
-        asset::replan(hc.tx, hc.ctx, &mut current, -d(doc, "repair_cost"), co.precision).await?;
+        asset::extend_life(&mut current, -crate::int(doc, "increase_in_asset_life"))?;
+        asset::replan(hc.tx, hc.ctx, &mut current, -(d(doc, "repair_cost") + d(doc, "parts_cost")), co.precision).await?;
         asset::save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())
     }

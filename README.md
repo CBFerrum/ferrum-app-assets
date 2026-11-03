@@ -299,7 +299,7 @@ CHANGELOG.md  what changed in each version
 
 | Version | Highlights |
 |---|---|
-| **0.3.0** | Finance books keep their own values: an asset lists the books that depreciate it their own way (method, life, frequency, salvage), each book books its own schedule and the common depreciation is taken out of it, a value adjustment can change one book alone, and a sale or scrap clears each book's difference into that book's gain or loss. The register and the depreciation schedule show a book's values. Needs ERP 0.6.0 or later. |
+| **0.3.0** | Finance books keep their own values: an asset lists the books that depreciate it their own way (method, life, frequency, salvage), each book books its own schedule and the common depreciation is taken out of it, a value adjustment can change one book alone, and a sale or scrap clears each book's difference into that book's gain or loss. The register and the depreciation schedule show a book's values. A repair can add whole periods to the asset's life and use parts from stock, their value part of its cost. Needs ERP 0.6.0 or later. |
 | **0.2.0** | An interface of its own: an overview of what is owned and what needs a person, a page for every asset, and verifying a room; serial number, warranty, return dates and physical verification. |
 | **0.1.1** | Requires the ERP app: installing it in a workspace without ERP installs ERP whole, with its interface, rather than a few of its packages. |
 | **0.1.0** | First release: asset categories with per-company accounts, locations, assets with generated or manual depreciation schedules (straight line … |
