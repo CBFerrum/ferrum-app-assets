@@ -1238,6 +1238,42 @@ async fn scenario() {
     assert_eq!(books_of(&c).iter().map(|r| r.1).collect::<Vec<_>>(), [n("2000"); 2]);
     assert_eq!(t.get("StockEntry", issue["id"].as_str().unwrap().parse().unwrap()).await["docstatus"], json!(2), "the parts went back to stock");
 
+    // ───────────── a grouped asset split ─────────────
+    // Four desks bought together for 4,000 in 2021: ten years in the common books (400 a year), five
+    // in the tax book (800). One is split off: a quarter of everything, booked rows included.
+    let desks = t
+        .insert(
+            &a,
+            "Asset",
+            json!({"item": press_item.to_string(), "asset_name": "Desks", "asset_quantity": 4, "company": cid.to_string(), "location": plant.to_string(),
+                   "is_existing_asset": true, "purchase_date": "2021-01-01", "gross_purchase_amount": "4000", "depreciation_method": "Straight Line",
+                   "total_number_of_depreciations": 10, "frequency_of_depreciation": 12, "start_convention": "Full First Period",
+                   "finance_books": [{"finance_book": tax.to_string(), "total_number_of_depreciations": 5}]}),
+        )
+        .await;
+    let desks = uid(&desks);
+    t.submit(&manager, "Asset", desks).await;
+    t.upkeep().await;
+    let before = t.get("Asset", desks).await;
+    let booked = schedule(&before).iter().filter(|r| r.2).count();
+    assert!(booked >= 5, "2021 to 2025 at least: {booked}");
+    let all = t.k.run_action(&manager, "Asset", desks, "split_asset", json!({"split_qty": 4})).await;
+    assert!(matches!(all, Err(ref e) if validation(e, "from 1 to 3")), "{all:?}");
+    let done = t.k.run_action(&manager, "Asset", desks, "split_asset", json!({"split_qty": 1})).await.expect("split");
+    let one: Uuid = done["asset"].as_str().unwrap().parse().unwrap();
+    let (three, desk) = (t.get("Asset", desks).await, t.get("Asset", one).await);
+    assert_eq!((three["asset_quantity"].clone(), desk["asset_quantity"].clone(), desk["split_from"].clone()), (json!(3), json!(1), json!(desks.to_string())));
+    assert_eq!((dec(&three["gross_purchase_amount"]), dec(&desk["gross_purchase_amount"])), (n("3000"), n("1000")));
+    assert_eq!((amounts(&three), amounts(&desk)), (vec![n("300"); 10], vec![n("100"); 10]));
+    assert_eq!(books_of(&desk).iter().map(|r| r.1).collect::<Vec<_>>(), [n("200"); 5]);
+    assert_eq!(schedule(&desk).iter().filter(|r| r.2).count(), booked, "what was booked stays booked, in both");
+    assert_eq!(dec(&desk["accumulated_depreciation"]), n("100") * Decimal::from(booked as i64));
+    let value = |x: &Doc| dec(&x["value_after_depreciation"]);
+    assert_eq!(value(&three) + value(&desk), value(&before));
+    assert_eq!(desk["status"], json!("Partially Depreciated"));
+    let undo = t.k.cancel(&manager, "Asset", one, None).await;
+    assert!(matches!(undo, Err(Error::Invalid(ref m)) if m.contains("was split")), "booked depreciation is the two assets': {undo:?}");
+
     // ───────────── the books ─────────────
     let tb = t.report(&a, "trial_balance", &[("company", cid.to_string()), ("from_date", "2019-01-01".into()), ("to_date", today.clone())]).await;
     assert_eq!(tb["meta"]["balanced"], json!(true), "{}", tb["totals"]);

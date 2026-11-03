@@ -409,6 +409,25 @@ async fn book(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, i: 
 /// (reversed).
 async fn unbook(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, i: usize) -> Result<()> {
     let mut list = rows_in(doc, book);
+    // Booked before a split, the entry is the two assets' and stays.
+    if let Some(je) = id(&list[i], "journal_entry") {
+        let shared: bool = sqlx::query_scalar(
+            "select exists (select 1 from e_asset__schedule where tenant_id = $1 and journal_entry = $2 and parent_id <> $3 \
+             union all select 1 from e_asset__book_schedule where tenant_id = $1 and journal_entry = $2 and parent_id <> $3)",
+        )
+        .bind(ctx.tenant)
+        .bind(je)
+        .bind(id(doc, "id"))
+        .fetch_one(&mut **tx)
+        .await?;
+        if shared {
+            return Err(Error::invalid(format!(
+                "the depreciation of {} was booked before asset {} was split, by an entry the two share; it cannot be undone",
+                row_day(&list[i]),
+                named(doc)
+            )));
+        }
+    }
     if let Some(row) = id(&list[i], "id") {
         let mut v = Doc::new();
         v.insert("journal_entry".into(), Value::Null);
@@ -547,6 +566,73 @@ pub(crate) fn extend_life(doc: &mut Doc, months: i64) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Splits `qty` units off a grouped asset into an asset of their own (one of ten chairs to be sold,
+/// say): its cost, salvage value, opening depreciation and every schedule row, in every book, in
+/// proportion; the asset keeps what rounding leaves. Depreciation already booked stays booked by the
+/// entries that booked it, which the two then share, so neither can undo it. Repairs and value
+/// adjustments belong to one asset: an asset they changed is not split.
+pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: i64) -> Result<Doc> {
+    let (mut doc, old) = open(k, ctx, tx, asset).await?;
+    in_service(&doc)?;
+    if matches!(s(&doc, "status"), Some("Out of Order" | "In Maintenance")) {
+        return Err(Error::invalid(format!("asset {} has a repair or maintenance in progress", named(&doc))));
+    }
+    let units = int(&doc, "asset_quantity");
+    if units < 2 {
+        return Err(Error::field("split_qty", "an asset of one unit is not split"));
+    }
+    if qty < 1 || qty >= units {
+        return Err(Error::field("split_qty", format!("must be from 1 to {}", units - 1)));
+    }
+    let (repairs, adjustments, by_book) = changes(tx, ctx.tenant, asset).await?;
+    if !repairs.is_zero() || !adjustments.is_zero() || by_book.values().any(|v| !v.is_zero()) {
+        return Err(Error::invalid(format!("a capitalized repair or a value adjustment changed asset {}'s value; an asset is split only before", named(&doc))));
+    }
+    let co = company(k, ctx, tx, id(&doc, "company").unwrap_or_default()).await?;
+    let part = |v: Decimal| schedule::round(v * Decimal::from(qty) / Decimal::from(units), co.precision);
+    // Moves the split-off share of `field` from `from` to `to`.
+    let divide = |from: &mut Doc, to: &mut Doc, field: &str| {
+        if from.get(field).is_some_and(|v| !v.is_null()) {
+            let all = d(from, field);
+            set(to, field, money(part(all)));
+            set(from, field, money(all - part(all)));
+        }
+    };
+    let mut new = doc.clone();
+    for f in ["gross_purchase_amount", "opening_accumulated_depreciation", "salvage_value"] {
+        divide(&mut doc, &mut new, f);
+    }
+    for t in ["finance_books", "schedule", "book_schedule"] {
+        let mut kept = rows(&doc, t);
+        let mut taken = Vec::new();
+        for r in kept.iter_mut() {
+            let mut c = r.clone();
+            set(&mut c, "id", Uuid::now_v7().to_string());
+            for f in ["depreciation_amount", "opening_accumulated_depreciation", "salvage_value"] {
+                divide(r, &mut c, f);
+            }
+            taken.push(c);
+        }
+        set(&mut doc, t, Value::Array(kept.into_iter().map(Value::Object).collect()));
+        set(&mut new, t, Value::Array(taken.into_iter().map(Value::Object).collect()));
+    }
+    set(&mut new, "id", Uuid::now_v7().to_string());
+    set(&mut new, "asset_quantity", qty);
+    set(&mut new, "split_from", asset.to_string());
+    set(&mut new, "version", 1);
+    set(&mut doc, "asset_quantity", units - qty);
+    let ent = k.entity(ctx, "Asset")?;
+    let number = ferrum_kernel::numbering::assign(&k.db, ctx, tx, &ent, &new).await?;
+    set(&mut new, "number", number);
+    carry_dates(tx, ctx.tenant, &mut new, true).await?;
+    columns(&mut new, Decimal::ZERO, Decimal::ZERO, &HashMap::new());
+    let st = status(tx, ctx.tenant, &new, None).await?;
+    set(&mut new, "status", st);
+    store::insert_row(tx, &ctx.schema, &ent, ctx.tenant, &new).await?;
+    save(k, ctx, tx, doc, &old, None).await?;
+    Ok(new)
 }
 
 /// Books depreciation up to a disposal date in every book: rows booked after it are unbooked, rows
@@ -951,6 +1037,16 @@ impl DocHook for AssetHook {
     /// thing, not part of what was booked, so they stay editable on a submitted asset (which the
     /// form cannot do). A field left out of the parameters stays as it is; an empty one is cleared.
     async fn action(&self, hc: &mut HookCtx<'_>, name: &str, doc: &Doc, params: &Value) -> Result<Option<Value>> {
+        if name == "split_asset" {
+            let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
+            let qty = params
+                .get("split_qty")
+                .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|t| t.trim().parse().ok())))
+                .ok_or_else(|| Error::field("split_qty", "is required"))?;
+            let new = split(hc.kernel, hc.ctx, hc.tx, asset, qty).await?;
+            let number = s(&new, "number").unwrap_or_default().to_string();
+            return Ok(Some(json!({"message": format!("Split off as asset {number}"), "asset": new.get("id"), "number": number})));
+        }
         if name != "update_details" {
             return Ok(None);
         }
