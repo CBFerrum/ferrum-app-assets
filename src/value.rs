@@ -3,7 +3,7 @@
 //! left where it was booked. Both first book the depreciation due by their date, post the change
 //! and re-plan the rest of the schedule; cancelling reverses the posting and re-plans again.
 
-use crate::asset::{self, day, in_service};
+use crate::asset::{self, Book, day, in_service};
 use crate::setup::check_account;
 use crate::{check_places, named};
 use async_trait::async_trait;
@@ -24,14 +24,11 @@ async fn readable_asset(hc: &mut HookCtx<'_>, doc: &Doc) -> Result<Doc> {
     })
 }
 
-/// Company, finance book and cost center follow the asset.
+/// Company and cost center follow the asset.
 async fn follow_asset(hc: &mut HookCtx<'_>, doc: &mut Doc) -> Result<Option<Doc>> {
     let Some(a) = id(doc, "asset") else { return Ok(None) };
     let current = get(hc.kernel, hc.ctx, hc.tx, "Asset", a).await?;
     set(doc, "company", current.get("company").cloned().unwrap_or(Value::Null));
-    if hc.entity.field("finance_book").is_some() {
-        set(doc, "finance_book", current.get("finance_book").cloned().unwrap_or(Value::Null));
-    }
     if id(doc, "cost_center").is_none() {
         set(doc, "cost_center", current.get("cost_center").cloned().unwrap_or(Value::Null));
     }
@@ -39,14 +36,25 @@ async fn follow_asset(hc: &mut HookCtx<'_>, doc: &mut Doc) -> Result<Option<Doc>
 }
 
 /// Posts a value change of `amount` (positive = up) between the asset's fixed asset account and
-/// `other`.
-async fn post_change(hc: &mut HookCtx<'_>, doc: &Doc, current: &Doc, on: chrono::NaiveDate, amount: Decimal, other: Uuid, memo: String) -> Result<()> {
+/// `other`, in `book` alone or (`None`) in every book.
+#[allow(clippy::too_many_arguments)]
+async fn post_change(
+    hc: &mut HookCtx<'_>,
+    doc: &Doc,
+    current: &Doc,
+    on: chrono::NaiveDate,
+    amount: Decimal,
+    other: Uuid,
+    memo: String,
+    book: Book,
+) -> Result<()> {
     let co = company(hc.kernel, hc.ctx, hc.tx, id(current, "company").unwrap_or_default()).await?;
     let fixed_asset = id(current, "fixed_asset_account").ok_or_else(|| Error::internal("asset without fixed asset account"))?;
     let me = id(doc, "id").ok_or_else(|| Error::internal("document without id"))?;
     let cc = id(doc, "cost_center").or_else(|| id(current, "cost_center"));
     let mut entry = Entry::new(co.id, on, &hc.entity.def.name, me, s(doc, "number").map(str::to_string));
     entry.memo = Some(memo.clone());
+    entry.finance_book = book;
     entry.lines = vec![
         Line::new(fixed_asset, amount, &co.currency_code).cost_center(cc).remarks(memo.clone()),
         Line::new(other, -amount, &co.currency_code).cost_center(cc).remarks(memo),
@@ -65,7 +73,11 @@ impl DocHook for AdjustmentHook {
         }
         if let Some(current) = follow_asset(hc, doc).await? {
             // A preview; the submit books the depreciation due by the date and fixes both figures.
-            let value = d(&current, "value_after_depreciation");
+            let value = match id(doc, "finance_book") {
+                Some(bk) => rows(&current, "finance_books").iter().find(|r| id(r, "finance_book") == Some(bk)).map(|r| d(r, "value_after_depreciation")),
+                None => None,
+            }
+            .unwrap_or_else(|| d(&current, "value_after_depreciation"));
             set(doc, "current_asset_value", money(value));
             set(doc, "difference_amount", money(d(doc, "new_asset_value") - value));
         }
@@ -96,7 +108,13 @@ impl DocHook for AdjustmentHook {
         if let Some(n) = later {
             return Err(Error::field("adjustment_date", format!("value adjustment {n} is dated later")));
         }
-        let floor = if b(&current, "calculate_depreciation") { d(&current, "salvage_value") } else { Decimal::ZERO };
+        let book = id(doc, "finance_book");
+        if let Some(bk) = book
+            && !asset::books(&current).contains(&bk)
+        {
+            return Err(Error::field("finance_book", "the asset keeps no depreciation of its own in this book; add the book to its finance books first"));
+        }
+        let floor = if b(&current, "calculate_depreciation") { d(&asset::as_in(&current, book), "salvage_value") } else { Decimal::ZERO };
         if d(doc, "new_asset_value") < floor {
             return Err(Error::field("new_asset_value", format!("cannot be below the salvage value ({})", floor.normalize())));
         }
@@ -122,7 +140,8 @@ impl DocHook for AdjustmentHook {
         in_service(&current)?;
         let co = company(hc.kernel, hc.ctx, hc.tx, id(&current, "company").unwrap_or_default()).await?;
         asset::book_until(hc.kernel, hc.ctx, hc.tx, &mut current, on).await?;
-        let value = asset::net_book_value(hc.tx, hc.ctx, &current).await?;
+        let book = id(doc, "finance_book");
+        let value = asset::net_book_value(hc.tx, hc.ctx, &current, book).await?;
         let difference = d(doc, "new_asset_value") - value;
         if difference.is_zero() {
             return Err(Error::field("new_asset_value", "equals the asset's net book value on that date"));
@@ -133,8 +152,8 @@ impl DocHook for AdjustmentHook {
         hc.kernel.set_values_tx(&sys(hc.ctx), hc.tx, "AssetValueAdjustment", me, v).await?;
         let other = id(doc, "difference_account").ok_or_else(|| Error::field("difference_account", "is required"))?;
         let memo = format!("Value adjustment of {} from {} to {}", named(&current), value.normalize(), d(doc, "new_asset_value").normalize());
-        post_change(hc, doc, &current, on, difference, other, memo).await?;
-        asset::replan(hc.tx, hc.ctx, &mut current, difference, co.precision).await?;
+        post_change(hc, doc, &current, on, difference, other, memo, book).await?;
+        replan(hc, &mut current, book, difference, co.precision).await?;
         asset::save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())
     }
@@ -164,9 +183,17 @@ impl DocHook for AdjustmentHook {
         let (mut current, old) = asset::open(hc.kernel, hc.ctx, hc.tx, a).await?;
         let co = company(hc.kernel, hc.ctx, hc.tx, id(&current, "company").unwrap_or_default()).await?;
         ledger::reverse(hc.tx, hc.ctx, "AssetValueAdjustment", me, hc.ctx.today(), co.precision).await?;
-        asset::replan(hc.tx, hc.ctx, &mut current, -d(doc, "difference_amount"), co.precision).await?;
+        replan(hc, &mut current, id(doc, "finance_book"), -d(doc, "difference_amount"), co.precision).await?;
         asset::save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())
+    }
+}
+
+/// Re-plans the book an adjustment changed: one finance book, or (`None`) every book.
+async fn replan(hc: &mut HookCtx<'_>, current: &mut Doc, book: Book, change: Decimal, precision: u32) -> Result<()> {
+    match book {
+        Some(_) => asset::replan_in(hc.tx, hc.ctx, current, book, change, precision).await,
+        None => asset::replan(hc.tx, hc.ctx, current, change, precision).await,
     }
 }
 
@@ -252,7 +279,7 @@ impl DocHook for RepairHook {
         asset::book_until(hc.kernel, hc.ctx, hc.tx, &mut current, on).await?;
         let cost = d(doc, "repair_cost");
         let other = id(doc, "expense_account").ok_or_else(|| Error::field("expense_account", "is required"))?;
-        post_change(hc, doc, &current, on, cost, other, format!("Capitalized repair of {}", named(&current))).await?;
+        post_change(hc, doc, &current, on, cost, other, format!("Capitalized repair of {}", named(&current)), None).await?;
         asset::replan(hc.tx, hc.ctx, &mut current, cost, co.precision).await?;
         asset::save(hc.kernel, hc.ctx, hc.tx, current, &old, None).await?;
         Ok(())

@@ -61,6 +61,38 @@
     - {name: journal_entry, type: link, to: JournalEntry, read_only: true, no_copy: true, in_list: true}
     - {name: disposal, type: link, to: AssetDisposal, read_only: true, no_copy: true, description: The disposal that booked this pro-rata depreciation}
     - {name: posting_error, type: text, read_only: true, no_copy: true, description: Why the last attempt to book this row failed}
+    - {name: book_entries, type: json, read_only: true, hidden: true, no_copy: true, description: "The entries that take this row out of each finance book that keeps its own depreciation"}
+
+- name: AssetFinanceBook
+  label: Asset Finance Book
+  kind: child
+  description: A finance book that depreciates the asset its own way (IFRS beside the tax rules, say). What it leaves empty is the asset's.
+  fields:
+    - {name: finance_book, type: link, to: FinanceBook, required: true, in_list: true}
+    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance], in_list: true}
+    - {name: total_number_of_depreciations, type: int, min: 1, max: 1200, in_list: true}
+    - {name: frequency_of_depreciation, type: int, min: 1, max: 120, label: Frequency of Depreciation (Months), in_list: true}
+    - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year)}
+    - {name: salvage_value, type: currency, min: "0"}
+    - {name: opening_accumulated_depreciation, type: currency, min: "0", description: "For an existing asset: what this book had depreciated before it was registered (its entry is yours to make, as for the asset's own)"}
+    - {name: opening_number_of_booked_depreciations, type: int, min: 0}
+    - {name: depreciation_start_date, type: date, description: "Default: the end of this book's first period"}
+    - {name: accumulated_depreciation, type: currency, read_only: true, no_copy: true, in_list: true}
+    - {name: value_after_depreciation, type: currency, read_only: true, no_copy: true, in_list: true, label: Net Book Value}
+    - {name: next_depreciation_date, type: date, read_only: true, no_copy: true}
+
+- name: AssetBookSchedule
+  label: Finance Book Depreciation Schedule
+  kind: child
+  fields:
+    - {name: finance_book, type: link, to: FinanceBook, required: true, in_list: true}
+    - {name: schedule_date, type: date, required: true, in_list: true}
+    - {name: depreciation_amount, type: currency, required: true, min: "0", in_list: true}
+    - {name: accumulated_depreciation, type: currency, read_only: true, in_list: true, description: Including the book's opening accumulated depreciation}
+    - {name: booked, type: check, read_only: true, no_copy: true, in_list: true}
+    - {name: journal_entry, type: link, to: JournalEntry, read_only: true, no_copy: true, in_list: true}
+    - {name: disposal, type: link, to: AssetDisposal, read_only: true, no_copy: true}
+    - {name: posting_error, type: text, read_only: true, no_copy: true}
 
 - name: Asset
   label: Asset
@@ -81,7 +113,6 @@
     - {name: location, type: link, to: Location, required: true, link_filters: {is_group: false}, in_list: true, in_filter: true, description: Changed by asset movements once submitted}
     - {name: custodian, type: email, in_list: true, in_filter: true, description: Email of the user responsible for it; they see the asset. Changed by asset movements once submitted}
     - {name: cost_center, type: link, to: CostCenter, link_filters: {is_group: false}, description: Depreciation is booked to it (default the company's depreciation cost center)}
-    - {name: finance_book, type: link, to: FinanceBook, in_filter: true}
     - {name: asset_quantity, type: int, required: true, default: 1, min: 1}
     - {name: serial_number, type: data, max_length: 120, in_filter: true, description: What the maker stamped on it; stays editable after the asset is submitted (Edit Details)}
     - {name: manufacturer, type: data, max_length: 120}
@@ -105,6 +136,9 @@
     - {name: depreciation_start_date, type: date, visible_if: "doc.calculate_depreciation", description: "First depreciation date; default the end of the first period (for existing assets: the next depreciation date)"}
     - {name: salvage_value, type: currency, currency: currency, min: "0", default: 0, label: Salvage Value, description: Value expected at the end of its useful life; never depreciated}
     - {name: schedule, type: table, of: AssetDepreciationSchedule, label: Depreciation Schedule, description: "Generated from the settings, except for the Manual method where you enter it"}
+    - {name: finance_books, type: table, of: AssetFinanceBook, label: Finance Books, visible_if: "doc.calculate_depreciation",
+       description: "Books that depreciate the asset their own way; every other book has the depreciation above"}
+    - {name: book_schedule, type: table, of: AssetBookSchedule, label: Finance Book Schedules, read_only: true, visible_if: "doc.calculate_depreciation"}
     - {name: fixed_asset_account, type: link, to: Account, read_only: true, no_copy: true}
     - {name: accumulated_depreciation_account, type: link, to: Account, read_only: true, no_copy: true}
     - {name: depreciation_expense_account, type: link, to: Account, read_only: true, no_copy: true}
@@ -123,10 +157,11 @@
     - {name: disposal_date, type: date, read_only: true, no_copy: true}
     - {name: description, type: text}
   form:
-    - {label: Asset, fields: [asset_name, item, asset_category, company, currency, location, custodian, expected_return_date, cost_center, finance_book, asset_quantity, status]}
+    - {label: Asset, fields: [asset_name, item, asset_category, company, currency, location, custodian, expected_return_date, cost_center, asset_quantity, status]}
     - {label: Identity, fields: [serial_number, manufacturer, model_number, warranty_expiry_date, end_of_life_date]}
     - {label: Purchase, fields: [purchase_date, available_for_use_date, gross_purchase_amount, is_existing_asset, purchase_invoice, opening_accumulated_depreciation, opening_number_of_booked_depreciations]}
     - {label: Depreciation, fields: [calculate_depreciation, depreciation_method, total_number_of_depreciations, frequency_of_depreciation, rate_of_depreciation, start_convention, depreciation_start_date, salvage_value, schedule]}
+    - {label: Finance Books, collapsible: true, fields: [finance_books, book_schedule]}
     - {label: Values, fields: [total_asset_cost, additional_asset_cost, value_adjustments, accumulated_depreciation, value_after_depreciation, next_depreciation_date, disposal, disposal_date]}
     - {label: Verification, fields: [last_verified_date, next_verification_date, verification_result]}
     - {label: Accounts, collapsible: true, fields: [fixed_asset_account, accumulated_depreciation_account, depreciation_expense_account]}

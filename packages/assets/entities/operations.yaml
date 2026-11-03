@@ -57,7 +57,7 @@
     - {name: company, type: link, to: Company, required: true, default_expr: "user.default_company", in_filter: true}
     - {name: asset, type: link, to: Asset, required: true, in_list: true, in_filter: true}
     - {name: adjustment_date, type: date, required: true, default_expr: today, in_list: true}
-    - {name: finance_book, type: link, to: FinanceBook, read_only: true}
+    - {name: finance_book, type: link, to: FinanceBook, description: "Empty: the value in every book. A book: in that book alone (one of the asset's finance books)"}
     - {name: current_asset_value, type: currency, read_only: true, no_copy: true, in_list: true, description: "Net book value on the date, after the depreciation due by then (final on submit)"}
     - {name: new_asset_value, type: currency, required: true, min: "0", in_list: true}
     - {name: difference_amount, type: currency, read_only: true, no_copy: true, in_list: true}
@@ -173,6 +173,7 @@
     - {name: gain_or_loss, type: currency, read_only: true, no_copy: true, in_list: true, description: Proceeds less net book value (negative = loss)}
     - {name: disposal_account, type: link, to: Account, read_only: true, no_copy: true, label: Gain/Loss Account}
     - {name: schedule_snapshot, type: json, read_only: true, hidden: true, no_copy: true, description: "Schedule rows the disposal removed, restored if it is cancelled"}
+    - {name: book_values, type: json, read_only: true, no_copy: true, description: "The net book value and gain or loss in each finance book that keeps its own depreciation"}
     - {name: remarks, type: text}
   rules:
     - {name: positive_sale, check: "doc.disposal_type != 'Sell' || doc.sale_amount > 0.0", message: "Enter the sale amount"}
