@@ -16,6 +16,7 @@ use ferrum_kernel::value::parse_date;
 use ferrum_kernel::{Ctx, Doc, DocHook, Error, FieldError, HookCtx, Kernel, Result, Tx, store};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// A date field (`None` when empty or not a date).
@@ -81,15 +82,81 @@ pub(crate) fn plan_of(doc: &Doc, precision: u32) -> std::result::Result<Plan, Ve
     })
 }
 
-fn schedule_rows(doc: &Doc) -> Vec<Doc> {
-    let mut list = rows(doc, "schedule");
-    // By date, booked rows first: booked rows are always the oldest.
+/// Which depreciation something is about: the asset's own, which every finance book has (`None`),
+/// or the depreciation a finance book keeps instead.
+pub(crate) type Book = Option<Uuid>;
+
+/// The finance books that keep their own depreciation of the asset.
+pub(crate) fn books(doc: &Doc) -> Vec<Uuid> {
+    rows(doc, "finance_books").iter().filter_map(|r| id(r, "finance_book")).collect()
+}
+
+/// The asset's own depreciation, then each finance book's.
+pub(crate) fn every(doc: &Doc) -> Vec<Book> {
+    std::iter::once(None).chain(books(doc).into_iter().map(Some)).collect()
+}
+
+/// What a finance book may set for itself; what it leaves empty is the asset's.
+const BOOK_FIELDS: &[&str] = &[
+    "depreciation_method",
+    "total_number_of_depreciations",
+    "frequency_of_depreciation",
+    "rate_of_depreciation",
+    "salvage_value",
+    "opening_accumulated_depreciation",
+    "opening_number_of_booked_depreciations",
+    "depreciation_start_date",
+];
+
+/// The asset as `book` sees it: the book's settings in place of the asset's.
+pub(crate) fn as_in(doc: &Doc, book: Book) -> Doc {
+    let mut v = doc.clone();
+    if let Some(row) = book.and_then(|bk| rows(doc, "finance_books").into_iter().find(|r| id(r, "finance_book") == Some(bk))) {
+        for f in BOOK_FIELDS {
+            if let Some(x) = row.get(*f).filter(|x| !x.is_null()) {
+                v.insert(f.to_string(), x.clone());
+            }
+        }
+    }
+    v
+}
+
+fn table(book: Book) -> &'static str {
+    if book.is_some() { "book_schedule" } else { "schedule" }
+}
+
+/// The schedule `book` depreciates by, by date (booked rows first: they are always the oldest).
+fn rows_in(doc: &Doc, book: Book) -> Vec<Doc> {
+    let mut list: Vec<Doc> = rows(doc, table(book)).into_iter().filter(|r| book.is_none() || id(r, "finance_book") == book).collect();
     list.sort_by_key(|r| (s(r, "schedule_date").unwrap_or_default().to_string(), !b(r, "booked")));
     list
 }
 
+fn put_in(doc: &mut Doc, book: Book, list: Vec<Doc>) {
+    let mut all: Vec<Doc> = match book {
+        None => vec![],
+        Some(_) => rows(doc, "book_schedule").into_iter().filter(|r| id(r, "finance_book") != book).collect(),
+    };
+    all.extend(list.into_iter().map(|mut r| {
+        if let Some(bk) = book {
+            set(&mut r, "finance_book", bk.to_string());
+        }
+        r
+    }));
+    set(doc, table(book), Value::Array(all.into_iter().map(Value::Object).collect()));
+}
+
+fn schedule_rows(doc: &Doc) -> Vec<Doc> {
+    rows_in(doc, None)
+}
+
 fn put_rows(doc: &mut Doc, list: Vec<Doc>) {
-    set(doc, "schedule", Value::Array(list.into_iter().map(Value::Object).collect()));
+    put_in(doc, None, list)
+}
+
+/// The asset's depreciation plan as `book` sees it.
+pub(crate) fn plan_for(doc: &Doc, book: Book, precision: u32) -> std::result::Result<Plan, Vec<FieldError>> {
+    plan_of(&as_in(doc, book), precision)
 }
 
 fn new_row(on: NaiveDate, amount: Decimal) -> Doc {
@@ -100,37 +167,69 @@ fn row_day(r: &Doc) -> NaiveDate {
     day(r, "schedule_date").unwrap_or(NaiveDate::MIN)
 }
 
-/// Capitalized repairs and value adjustments submitted for an asset.
-async fn changes(tx: &mut Tx, tenant: Uuid, asset: Uuid) -> Result<(Decimal, Decimal)> {
-    Ok(sqlx::query_as(
-        "select coalesce((select sum(repair_cost) from e_asset_repair where tenant_id = $1 and asset = $2 and docstatus = 1 and capitalize_repair_cost), 0), \
-         coalesce((select sum(difference_amount) from e_asset_value_adjustment where tenant_id = $1 and asset = $2 and docstatus = 1), 0)",
+/// Capitalized repairs and the value adjustments every book has, and the adjustments each
+/// finance book made alone.
+async fn changes(tx: &mut Tx, tenant: Uuid, asset: Uuid) -> Result<(Decimal, Decimal, HashMap<Uuid, Decimal>)> {
+    let (repairs, adjustments): (Decimal, Decimal) = sqlx::query_as(
+        "select coalesce((select sum(repair_cost + coalesce(parts_cost, 0)) from e_asset_repair where tenant_id = $1 and asset = $2 and docstatus = 1 and capitalize_repair_cost), 0), \
+         coalesce((select sum(difference_amount) from e_asset_value_adjustment where tenant_id = $1 and asset = $2 and docstatus = 1 and finance_book is null), 0)",
     )
     .bind(tenant)
     .bind(asset)
     .fetch_one(&mut **tx)
-    .await?)
+    .await?;
+    let books: Vec<(Uuid, Decimal)> = sqlx::query_as(
+        "select finance_book, sum(difference_amount) from e_asset_value_adjustment \
+         where tenant_id = $1 and asset = $2 and docstatus = 1 and finance_book is not null group by finance_book",
+    )
+    .bind(tenant)
+    .bind(asset)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok((repairs, adjustments, books.into_iter().collect()))
 }
 
-/// Fills the schedule's running total and order, and the asset's figures from it.
-fn columns(doc: &mut Doc, repairs: Decimal, adjustments: Decimal) {
-    let opening = d(doc, "opening_accumulated_depreciation");
-    let mut list = schedule_rows(doc);
-    let (mut running, mut booked) = (opening, opening);
-    let mut next = Value::Null;
-    for (i, r) in list.iter_mut().enumerate() {
-        let a = d(r, "depreciation_amount");
-        running += a;
-        set(r, "idx", i);
-        set(r, "accumulated_depreciation", money(running));
-        if b(r, "booked") {
-            booked += a;
-        } else if next.is_null() {
-            next = r.get("schedule_date").cloned().unwrap_or(Value::Null);
+/// Fills each schedule's running total and order, and the asset's figures from them: its own on
+/// the asset, each finance book's on its row of finance books.
+fn columns(doc: &mut Doc, repairs: Decimal, adjustments: Decimal, by_book: &HashMap<Uuid, Decimal>) {
+    let cost = d(doc, "gross_purchase_amount") + repairs + adjustments;
+    let mut figures: HashMap<Book, (Decimal, Decimal, Value)> = HashMap::new();
+    for book in every(doc) {
+        let opening = d(&as_in(doc, book), "opening_accumulated_depreciation");
+        let mut list = rows_in(doc, book);
+        let (mut running, mut booked) = (opening, opening);
+        let mut next = Value::Null;
+        for r in list.iter_mut() {
+            let a = d(r, "depreciation_amount");
+            running += a;
+            set(r, "accumulated_depreciation", money(running));
+            if b(r, "booked") {
+                booked += a;
+            } else if next.is_null() {
+                next = r.get("schedule_date").cloned().unwrap_or(Value::Null);
+            }
+        }
+        put_in(doc, book, list);
+        let cost = cost + book.and_then(|bk| by_book.get(&bk)).copied().unwrap_or_default();
+        figures.insert(book, (cost, booked, next));
+    }
+    for t in ["schedule", "book_schedule"] {
+        let mut list = rows(doc, t);
+        for (i, r) in list.iter_mut().enumerate() {
+            set(r, "idx", i);
+        }
+        set(doc, t, Value::Array(list.into_iter().map(Value::Object).collect()));
+    }
+    let mut kept = rows(doc, "finance_books");
+    for r in kept.iter_mut() {
+        if let Some((cost, booked, next)) = figures.get(&id(r, "finance_book")).filter(|_| id(r, "finance_book").is_some()) {
+            set(r, "accumulated_depreciation", money(*booked));
+            set(r, "value_after_depreciation", money(*cost - *booked));
+            set(r, "next_depreciation_date", next.clone());
         }
     }
-    put_rows(doc, list);
-    let cost = d(doc, "gross_purchase_amount") + repairs + adjustments;
+    set(doc, "finance_books", Value::Array(kept.into_iter().map(Value::Object).collect()));
+    let (_, booked, next) = figures.remove(&None).unwrap_or((cost, Decimal::ZERO, Value::Null));
     set(doc, "additional_asset_cost", money(repairs));
     set(doc, "value_adjustments", money(adjustments));
     set(doc, "total_asset_cost", money(cost));
@@ -188,8 +287,8 @@ pub(crate) async fn open(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid) -> Res
 /// Recomputes the figures and status of a changed asset and writes the difference.
 pub(crate) async fn save(k: &Kernel, ctx: &Ctx, tx: &mut Tx, mut doc: Doc, old: &Doc, exclude: Option<Uuid>) -> Result<Doc> {
     let asset = id(&doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
-    let (repairs, adjustments) = changes(tx, ctx.tenant, asset).await?;
-    columns(&mut doc, repairs, adjustments);
+    let (repairs, adjustments, by_book) = changes(tx, ctx.tenant, asset).await?;
+    columns(&mut doc, repairs, adjustments, &by_book);
     let st = status(tx, ctx.tenant, &doc, exclude).await?;
     set(&mut doc, "status", st);
     let ent = k.entity(ctx, "Asset")?;
@@ -204,18 +303,24 @@ pub(crate) async fn refresh(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, exc
     Ok(())
 }
 
-/// Net book value now: cost (with capitalized repairs and value adjustments) less opening and
-/// booked depreciation, counting rows booked in memory.
-pub(crate) async fn net_book_value(tx: &mut Tx, ctx: &Ctx, doc: &Doc) -> Result<Decimal> {
+/// Net book value now in `book`: cost (with capitalized repairs and value adjustments, the book's
+/// own among them) less opening and booked depreciation, counting rows booked in memory.
+pub(crate) async fn net_book_value(tx: &mut Tx, ctx: &Ctx, doc: &Doc, book: Book) -> Result<Decimal> {
     let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
-    let (repairs, adjustments) = changes(tx, ctx.tenant, asset).await?;
-    let booked: Decimal = rows(doc, "schedule").iter().filter(|r| b(r, "booked")).map(|r| d(r, "depreciation_amount")).sum();
-    Ok(d(doc, "gross_purchase_amount") + repairs + adjustments - d(doc, "opening_accumulated_depreciation") - booked)
+    let (repairs, adjustments, by_book) = changes(tx, ctx.tenant, asset).await?;
+    let own = book.and_then(|bk| by_book.get(&bk)).copied().unwrap_or_default();
+    Ok(d(doc, "gross_purchase_amount") + repairs + adjustments + own - accumulated(doc, book))
 }
 
-/// The latest booked depreciation date.
+/// Opening and booked depreciation in `book`, counting rows booked in memory.
+pub(crate) fn accumulated(doc: &Doc, book: Book) -> Decimal {
+    d(&as_in(doc, book), "opening_accumulated_depreciation")
+        + rows_in(doc, book).iter().filter(|r| b(r, "booked")).map(|r| d(r, "depreciation_amount")).sum::<Decimal>()
+}
+
+/// The latest booked depreciation date, in any book.
 pub(crate) fn booked_until(doc: &Doc) -> Option<NaiveDate> {
-    rows(doc, "schedule").iter().filter(|r| b(r, "booked")).map(row_day).max()
+    every(doc).into_iter().flat_map(|bk| rows_in(doc, bk)).filter(|r| b(r, "booked")).map(|r| row_day(&r)).max()
 }
 
 /// The fields `carry_dates` keeps.
@@ -248,65 +353,123 @@ pub(crate) fn in_service(asset: &Doc) -> Result<()> {
     }
 }
 
-/// Books schedule row `i` as a submitted depreciation journal entry: debit depreciation
-/// expense, credit accumulated depreciation, on the asset's cost center and the row's date.
-async fn book(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, i: usize) -> Result<()> {
-    let mut list = schedule_rows(doc);
-    let amount = d(&list[i], "depreciation_amount");
-    let on = row_day(&list[i]);
+/// Posts depreciation of `amount` on `on` as a submitted journal entry in `book` (`None`: every
+/// book): debit depreciation expense, credit accumulated depreciation, on the asset's cost center;
+/// `back` the other way round.
+async fn post_depreciation(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &Doc, on: NaiveDate, amount: Decimal, book: Book, back: bool) -> Result<Uuid> {
     let expense = id(doc, "depreciation_expense_account").ok_or_else(|| Error::invalid("the asset has no depreciation expense account"))?;
     let accumulated = id(doc, "accumulated_depreciation_account").ok_or_else(|| Error::invalid("the asset has no accumulated depreciation account"))?;
     let cc = id(doc, "cost_center").map(|c| c.to_string());
-    let what = format!("Depreciation of {} {}", named(doc), s(doc, "asset_name").unwrap_or_default());
+    let what = match (book, back) {
+        (Some(_), true) => {
+            format!("Depreciation of {} {} in the common books, which this book keeps its own of", named(doc), s(doc, "asset_name").unwrap_or_default())
+        }
+        _ => format!("Depreciation of {} {}", named(doc), s(doc, "asset_name").unwrap_or_default()),
+    };
+    let (dr, cr) = if back { (accumulated, expense) } else { (expense, accumulated) };
     let input = json!({
         "company": doc.get("company"), "posting_date": on.to_string(), "entry_type": "Depreciation", "fa_asset": doc.get("id"), "remark": what,
+        "finance_book": book.map(|bk| bk.to_string()),
         "accounts": [
-            {"account": expense.to_string(), "debit": money(amount), "cost_center": cc, "remarks": what},
-            {"account": accumulated.to_string(), "credit": money(amount), "cost_center": cc, "remarks": what},
+            {"account": dr.to_string(), "debit": money(amount), "cost_center": cc, "remarks": what},
+            {"account": cr.to_string(), "credit": money(amount), "cost_center": cc, "remarks": what},
         ],
     });
     let engine = elevated(ctx);
     let je = k.insert_tx(&engine, tx, "JournalEntry", obj(input)).await?;
     let je = id(&je, "id").ok_or_else(|| Error::internal("journal entry without id"))?;
     k.submit_tx(&engine, tx, "JournalEntry", je, None).await?;
+    Ok(je)
+}
+
+/// Books row `i` of `book`'s schedule on its date. A row of the asset's own schedule is in every
+/// book, so each finance book that keeps its own depreciation takes it out again.
+async fn book(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, i: usize) -> Result<()> {
+    let mut list = rows_in(doc, book);
+    let amount = d(&list[i], "depreciation_amount");
+    let on = row_day(&list[i]);
+    let je = post_depreciation(k, ctx, tx, doc, on, amount, book, false).await?;
+    if book.is_none() {
+        let mut out = Vec::new();
+        for bk in books(doc) {
+            let back = post_depreciation(k, ctx, tx, doc, on, amount, Some(bk), true).await?;
+            out.push(json!({"finance_book": bk.to_string(), "journal_entry": back.to_string()}));
+        }
+        set(&mut list[i], "book_entries", if out.is_empty() { Value::Null } else { Value::Array(out) });
+    }
     set(&mut list[i], "journal_entry", je.to_string());
     set(&mut list[i], "booked", true);
     set(&mut list[i], "posting_error", Value::Null);
-    put_rows(doc, list);
+    put_in(doc, book, list);
     Ok(())
 }
 
-/// Unbooks row `i`: the row lets go of its journal entry first (the journal entry guard refuses
-/// to cancel an entry a schedule row still books), then the entry is cancelled (reversed).
-async fn unbook(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, i: usize) -> Result<()> {
-    let mut list = schedule_rows(doc);
+/// Unbooks row `i` of `book`'s schedule: the row lets go of its journal entries first (the journal
+/// entry guard refuses to cancel an entry a schedule row still books), then they are cancelled
+/// (reversed).
+async fn unbook(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, i: usize) -> Result<()> {
+    let mut list = rows_in(doc, book);
+    // Booked before a split, the entry is the two assets' and stays.
+    if let Some(je) = id(&list[i], "journal_entry") {
+        let shared: bool = sqlx::query_scalar(
+            "select exists (select 1 from e_asset__schedule where tenant_id = $1 and journal_entry = $2 and parent_id <> $3 \
+             union all select 1 from e_asset__book_schedule where tenant_id = $1 and journal_entry = $2 and parent_id <> $3)",
+        )
+        .bind(ctx.tenant)
+        .bind(je)
+        .bind(id(doc, "id"))
+        .fetch_one(&mut **tx)
+        .await?;
+        if shared {
+            return Err(Error::invalid(format!(
+                "the depreciation of {} was booked before asset {} was split, by an entry the two share; it cannot be undone",
+                row_day(&list[i]),
+                named(doc)
+            )));
+        }
+    }
     if let Some(row) = id(&list[i], "id") {
         let mut v = Doc::new();
         v.insert("journal_entry".into(), Value::Null);
         v.insert("booked".into(), json!(false));
-        match k.set_child_values_tx(&sys(ctx), tx, "Asset", "schedule", row, v).await {
+        if book.is_none() {
+            v.insert("book_entries".into(), Value::Null);
+        }
+        match k.set_child_values_tx(&sys(ctx), tx, "Asset", table(book), row, v).await {
             Ok(()) | Err(Error::NotFound(_)) => {}
             Err(e) => return Err(e),
         }
     }
-    if let Some(je) = id(&list[i], "journal_entry") {
+    let taken_out = list[i].get("book_entries").and_then(Value::as_array).cloned().unwrap_or_default();
+    for je in id(&list[i], "journal_entry").into_iter().chain(taken_out.iter().filter_map(|e| e.get("journal_entry")?.as_str()?.parse().ok())) {
         k.cancel_tx(&elevated(ctx), tx, "JournalEntry", je, None).await?;
     }
     set(&mut list[i], "journal_entry", Value::Null);
     set(&mut list[i], "booked", false);
-    put_rows(doc, list);
+    set(&mut list[i], "book_entries", Value::Null);
+    put_in(doc, book, list);
     Ok(())
 }
 
-/// Books the next unbooked row if it is due by `until`; `false` when there is none.
+/// Books the earliest unbooked row of any book if it is due by `until` (the asset's own first on
+/// the same day); `false` when there is none.
 pub(crate) async fn book_next(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, until: NaiveDate) -> Result<bool> {
-    let list = schedule_rows(doc);
-    match list.iter().position(|r| !b(r, "booked")) {
-        Some(i) if row_day(&list[i]) <= until => {
-            book(k, ctx, tx, doc, i).await?;
+    let mut next: Option<(NaiveDate, usize, Book, usize)> = None;
+    for (order, bk) in every(doc).into_iter().enumerate() {
+        let list = rows_in(doc, bk);
+        if let Some(i) = list.iter().position(|r| !b(r, "booked"))
+            && row_day(&list[i]) <= until
+            && next.as_ref().is_none_or(|n| (row_day(&list[i]), order) < (n.0, n.1))
+        {
+            next = Some((row_day(&list[i]), order, bk, i));
+        }
+    }
+    match next {
+        Some((_, _, bk, i)) => {
+            book(k, ctx, tx, doc, bk, i).await?;
             Ok(true)
         }
-        _ => Ok(false),
+        None => Ok(false),
     }
 }
 
@@ -319,16 +482,24 @@ pub(crate) async fn book_until(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc
     Ok(n)
 }
 
-/// Re-plans the unbooked rows after the asset's value changed by `change` (the document making
-/// the change is already counted in the asset's figures). Generated methods recompute the periods
-/// left from the net book value; a manual plan is rescaled in proportion to the value it
-/// depreciates. Never below salvage.
+/// Re-plans every book's unbooked rows after the asset's value changed by `change` in all of them.
 pub(crate) async fn replan(tx: &mut Tx, ctx: &Ctx, doc: &mut Doc, change: Decimal, precision: u32) -> Result<()> {
+    for bk in every(doc) {
+        replan_in(tx, ctx, doc, bk, change, precision).await?;
+    }
+    Ok(())
+}
+
+/// Re-plans `book`'s unbooked rows after the asset's value in it changed by `change` (the document
+/// making the change is already counted in the asset's figures). Generated methods recompute the
+/// periods left from the net book value; a manual plan is rescaled in proportion to the value it
+/// depreciates. Never below salvage.
+pub(crate) async fn replan_in(tx: &mut Tx, ctx: &Ctx, doc: &mut Doc, book: Book, change: Decimal, precision: u32) -> Result<()> {
     if !b(doc, "calculate_depreciation") {
         return Ok(());
     }
-    let plan = plan_of(doc, precision).map_err(Error::Validation)?;
-    let value = net_book_value(tx, ctx, doc).await?;
+    let plan = plan_for(doc, book, precision).map_err(Error::Validation)?;
+    let value = net_book_value(tx, ctx, doc, book).await?;
     if value < plan.salvage {
         return Err(Error::invalid(format!(
             "this would take asset {}'s net book value ({}) below its salvage value ({})",
@@ -337,7 +508,7 @@ pub(crate) async fn replan(tx: &mut Tx, ctx: &Ctx, doc: &mut Doc, change: Decima
             plan.salvage.normalize()
         )));
     }
-    let (booked, planned): (Vec<Doc>, Vec<Doc>) = schedule_rows(doc).into_iter().partition(|r| b(r, "booked"));
+    let (booked, planned): (Vec<Doc>, Vec<Doc>) = rows_in(doc, book).into_iter().partition(|r| b(r, "booked"));
     let fresh: Vec<(NaiveDate, Decimal)> = if plan.method == Method::Manual {
         let amounts: Vec<Decimal> = planned.iter().map(|r| d(r, "depreciation_amount")).collect();
         let (before, after) = (value - change - plan.salvage, value - plan.salvage);
@@ -355,25 +526,150 @@ pub(crate) async fn replan(tx: &mut Tx, ctx: &Ctx, doc: &mut Doc, change: Decima
     };
     let mut list = booked;
     list.extend(fresh.into_iter().map(|(on, a)| new_row(on, a)));
-    put_rows(doc, list);
+    put_in(doc, book, list);
     Ok(())
 }
 
-/// Books depreciation up to a disposal date: rows booked after it are unbooked, rows due by it
-/// are booked, the running period is depreciated for its days up to the date (a row of its own,
-/// marked with the disposal) and the plan after it is removed. Returns the removed rows, which a
-/// cancelled disposal puts back.
+/// Adds `months` (fewer when negative) to the useful life of the asset and of each finance book
+/// that keeps its own depreciation, in whole periods of each; the caller re-plans.
+pub(crate) fn extend_life(doc: &mut Doc, months: i64) -> Result<()> {
+    if months == 0 {
+        return Ok(());
+    }
+    if !b(doc, "calculate_depreciation") || s(doc, "depreciation_method") == Some("Manual") {
+        return Err(Error::field("increase_in_asset_life", "only a generated depreciation plan is extended (a manual schedule is changed by hand)"));
+    }
+    let mut lives = Vec::new();
+    for bk in every(doc) {
+        let seen = as_in(doc, bk);
+        let frequency = int(&seen, "frequency_of_depreciation").max(1);
+        let whose = if bk.is_some() { "a finance book's" } else { "the asset's" };
+        if months % frequency != 0 {
+            return Err(Error::field("increase_in_asset_life", format!("{} months is not a whole number of {whose} {frequency}-month periods", months.abs())));
+        }
+        let periods = int(&seen, "total_number_of_depreciations") + months / frequency;
+        if periods < 1 {
+            return Err(Error::field("increase_in_asset_life", format!("would leave {whose} life without a period")));
+        }
+        lives.push((bk, periods));
+    }
+    for (bk, periods) in lives {
+        match bk {
+            None => set(doc, "total_number_of_depreciations", periods),
+            Some(_) => {
+                let mut list = rows(doc, "finance_books");
+                for r in list.iter_mut().filter(|r| id(r, "finance_book") == bk) {
+                    set(r, "total_number_of_depreciations", periods);
+                }
+                set(doc, "finance_books", Value::Array(list.into_iter().map(Value::Object).collect()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Splits `qty` units off a grouped asset into an asset of their own (one of ten chairs to be sold,
+/// say): its cost, salvage value, opening depreciation and every schedule row, in every book, in
+/// proportion; the asset keeps what rounding leaves. Depreciation already booked stays booked by the
+/// entries that booked it, which the two then share, so neither can undo it. Repairs and value
+/// adjustments belong to one asset: an asset they changed is not split.
+pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: i64) -> Result<Doc> {
+    let (mut doc, old) = open(k, ctx, tx, asset).await?;
+    in_service(&doc)?;
+    if matches!(s(&doc, "status"), Some("Out of Order" | "In Maintenance")) {
+        return Err(Error::invalid(format!("asset {} has a repair or maintenance in progress", named(&doc))));
+    }
+    let units = int(&doc, "asset_quantity");
+    if units < 2 {
+        return Err(Error::field("split_qty", "an asset of one unit is not split"));
+    }
+    if qty < 1 || qty >= units {
+        return Err(Error::field("split_qty", format!("must be from 1 to {}", units - 1)));
+    }
+    let (repairs, adjustments, by_book) = changes(tx, ctx.tenant, asset).await?;
+    if !repairs.is_zero() || !adjustments.is_zero() || by_book.values().any(|v| !v.is_zero()) {
+        return Err(Error::invalid(format!("a capitalized repair or a value adjustment changed asset {}'s value; an asset is split only before", named(&doc))));
+    }
+    let co = company(k, ctx, tx, id(&doc, "company").unwrap_or_default()).await?;
+    let part = |v: Decimal| schedule::round(v * Decimal::from(qty) / Decimal::from(units), co.precision);
+    // Moves the split-off share of `field` from `from` to `to`.
+    let divide = |from: &mut Doc, to: &mut Doc, field: &str| {
+        if from.get(field).is_some_and(|v| !v.is_null()) {
+            let all = d(from, field);
+            set(to, field, money(part(all)));
+            set(from, field, money(all - part(all)));
+        }
+    };
+    let mut new = doc.clone();
+    for f in ["gross_purchase_amount", "opening_accumulated_depreciation", "salvage_value"] {
+        divide(&mut doc, &mut new, f);
+    }
+    for t in ["finance_books", "schedule", "book_schedule"] {
+        let mut kept = rows(&doc, t);
+        let mut taken = Vec::new();
+        for r in kept.iter_mut() {
+            let mut c = r.clone();
+            set(&mut c, "id", Uuid::now_v7().to_string());
+            for f in ["depreciation_amount", "opening_accumulated_depreciation", "salvage_value"] {
+                divide(r, &mut c, f);
+            }
+            taken.push(c);
+        }
+        set(&mut doc, t, Value::Array(kept.into_iter().map(Value::Object).collect()));
+        set(&mut new, t, Value::Array(taken.into_iter().map(Value::Object).collect()));
+    }
+    set(&mut new, "id", Uuid::now_v7().to_string());
+    set(&mut new, "asset_quantity", qty);
+    set(&mut new, "split_from", asset.to_string());
+    set(&mut new, "version", 1);
+    set(&mut doc, "asset_quantity", units - qty);
+    let ent = k.entity(ctx, "Asset")?;
+    let number = ferrum_kernel::numbering::assign(&k.db, ctx, tx, &ent, &new).await?;
+    set(&mut new, "number", number);
+    carry_dates(tx, ctx.tenant, &mut new, true).await?;
+    columns(&mut new, Decimal::ZERO, Decimal::ZERO, &HashMap::new());
+    let st = status(tx, ctx.tenant, &new, None).await?;
+    set(&mut new, "status", st);
+    store::insert_row(tx, &ctx.schema, &ent, ctx.tenant, &new).await?;
+    save(k, ctx, tx, doc, &old, None).await?;
+    Ok(new)
+}
+
+/// Books depreciation up to a disposal date in every book: rows booked after it are unbooked, rows
+/// due by it are booked, the running period is depreciated for its days up to the date (a row of
+/// its own, marked with the disposal) and the plan after it is removed. Returns the removed rows,
+/// which a cancelled disposal puts back: `{"schedule": [...], "books": [{"finance_book", "rows"}]}`.
 pub(crate) async fn depreciate_to_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, on: NaiveDate, disposal: Uuid, precision: u32) -> Result<Value> {
-    while let Some(i) = schedule_rows(doc).iter().rposition(|r| b(r, "booked") && row_day(r) > on) {
-        unbook(k, ctx, tx, doc, i).await?;
+    for bk in every(doc) {
+        while let Some(i) = rows_in(doc, bk).iter().rposition(|r| b(r, "booked") && row_day(r) > on) {
+            unbook(k, ctx, tx, doc, bk, i).await?;
+        }
     }
     book_until(k, ctx, tx, doc, on).await?;
-    let mut list = schedule_rows(doc);
+    let mut snapshot = json!({"schedule": [], "books": []});
+    for bk in every(doc) {
+        let removed = cut_at(k, ctx, tx, doc, bk, on, disposal, precision).await?;
+        match bk {
+            None => snapshot["schedule"] = removed,
+            Some(b) => {
+                if let Some(list) = snapshot["books"].as_array_mut() {
+                    list.push(json!({"finance_book": b.to_string(), "rows": removed}));
+                }
+            }
+        }
+    }
+    Ok(snapshot)
+}
+
+/// `book`'s running period depreciated up to the disposal date and the rest of its plan removed.
+#[allow(clippy::too_many_arguments)]
+async fn cut_at(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, on: NaiveDate, disposal: Uuid, precision: u32) -> Result<Value> {
+    let mut list = rows_in(doc, book);
     let Some(i) = list.iter().position(|r| !b(r, "booked")) else { return Ok(json!([])) };
     let removed = list.split_off(i);
     let snapshot: Vec<Value> =
         removed.iter().map(|r| json!({"schedule_date": r.get("schedule_date"), "depreciation_amount": r.get("depreciation_amount")})).collect();
-    let plan = plan_of(doc, precision).map_err(Error::Validation)?;
+    let plan = plan_for(doc, book, precision).map_err(Error::Validation)?;
     let next = &removed[0];
     let start = plan.period_start(row_day(next), list.last().map(row_day));
     let amount = schedule::partial(d(next, "depreciation_amount"), start, row_day(next), on, precision);
@@ -382,29 +678,41 @@ pub(crate) async fn depreciate_to_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, d
         set(&mut row, "disposal", disposal.to_string());
         list.push(row);
     }
-    put_rows(doc, list);
-    if let Some(i) = schedule_rows(doc).iter().position(|r| id(r, "disposal") == Some(disposal)) {
-        book(k, ctx, tx, doc, i).await?;
+    put_in(doc, book, list);
+    if let Some(i) = rows_in(doc, book).iter().position(|r| id(r, "disposal") == Some(disposal)) {
+        self::book(k, ctx, tx, doc, book, i).await?;
     }
     Ok(Value::Array(snapshot))
 }
 
-/// Undoes `depreciate_to_disposal`: the disposal's own row is unbooked and removed, and the plan
-/// it removed comes back (rows it had to unbook come back unbooked, to be booked again).
+/// Undoes `depreciate_to_disposal`: each book's disposal row is unbooked and removed, and the plan
+/// it removed comes back (rows it had to unbook come back unbooked, to be booked again). A
+/// snapshot from before finance books kept their own depreciation is the asset's rows alone.
 pub(crate) async fn restore_after_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, disposal: Uuid, snapshot: &Value) -> Result<()> {
-    if let Some(i) = schedule_rows(doc).iter().position(|r| id(r, "disposal") == Some(disposal)) {
-        unbook(k, ctx, tx, doc, i).await?;
-        let mut list = schedule_rows(doc);
-        list.remove(i);
-        put_rows(doc, list);
-    }
-    let mut list = schedule_rows(doc);
-    for r in snapshot.as_array().map(Vec::as_slice).unwrap_or_default().iter().filter_map(Value::as_object) {
-        if let Some(on) = day(r, "schedule_date") {
-            list.push(new_row(on, d(r, "depreciation_amount")));
+    let mut removed: Vec<(Book, Value)> = match snapshot {
+        Value::Array(_) => vec![(None, snapshot.clone())],
+        _ => vec![(None, snapshot["schedule"].clone())],
+    };
+    for b in snapshot["books"].as_array().into_iter().flatten() {
+        if let Some(bk) = b["finance_book"].as_str().and_then(|v| v.parse().ok()) {
+            removed.push((Some(bk), b["rows"].clone()));
         }
     }
-    put_rows(doc, list);
+    for (bk, rows_removed) in removed {
+        if let Some(i) = rows_in(doc, bk).iter().position(|r| id(r, "disposal") == Some(disposal)) {
+            unbook(k, ctx, tx, doc, bk, i).await?;
+            let mut list = rows_in(doc, bk);
+            list.remove(i);
+            put_in(doc, bk, list);
+        }
+        let mut list = rows_in(doc, bk);
+        for r in rows_removed.as_array().map(Vec::as_slice).unwrap_or_default().iter().filter_map(Value::as_object) {
+            if let Some(on) = day(r, "schedule_date") {
+                list.push(new_row(on, d(r, "depreciation_amount")));
+            }
+        }
+        put_in(doc, bk, list);
+    }
     Ok(())
 }
 
@@ -451,6 +759,22 @@ async fn defaults(hc: &mut HookCtx<'_>, doc: &mut Doc) -> Result<()> {
         let first = schedule::add_months(schedule::default_start(afu, frequency as u32), (behind * frequency) as i32);
         set(doc, "depreciation_start_date", first.to_string());
     }
+    // Each finance book's first depreciation date, by its own frequency.
+    if b(doc, "calculate_depreciation")
+        && let Some(afu) = day(doc, "available_for_use_date")
+    {
+        let mut list = rows(doc, "finance_books");
+        for r in list.iter_mut() {
+            let seen = as_in(doc, id(r, "finance_book"));
+            let frequency = int(&seen, "frequency_of_depreciation");
+            if frequency > 0 && day(r, "depreciation_start_date").is_none_or(|start| start < afu) {
+                let behind = int(&seen, "opening_number_of_booked_depreciations").clamp(0, 1200);
+                let first = schedule::add_months(schedule::default_start(afu, frequency as u32), (behind * frequency) as i32);
+                set(r, "depreciation_start_date", first.to_string());
+            }
+        }
+        set(doc, "finance_books", Value::Array(list.into_iter().map(Value::Object).collect()));
+    }
     if id(doc, "cost_center").is_none()
         && let Some(cid) = id(doc, "company")
     {
@@ -489,7 +813,17 @@ fn preview(doc: &mut Doc, precision: u32) {
         };
         put_rows(doc, list);
     }
-    columns(doc, Decimal::ZERO, Decimal::ZERO);
+    set(doc, "book_schedule", Value::Array(vec![]));
+    if b(doc, "calculate_depreciation") {
+        for bk in books(doc) {
+            let seen = as_in(doc, Some(bk));
+            let value = d(&seen, "gross_purchase_amount") - d(&seen, "opening_accumulated_depreciation");
+            if let Ok(plan) = plan_of(&seen, precision) {
+                put_in(doc, Some(bk), plan.amounts(&plan.slots(), value).into_iter().map(|(on, a)| new_row(on, a)).collect());
+            }
+        }
+    }
+    columns(doc, Decimal::ZERO, Decimal::ZERO, &HashMap::new());
 }
 
 /// Moves a purchase booked to capital work in progress (or another category's account) to the
@@ -599,6 +933,30 @@ impl DocHook for AssetHook {
                 }
             }
         }
+        // A finance book keeps its own depreciation once, by a generated plan.
+        let mut seen = std::collections::BTreeSet::new();
+        for (i, r) in rows(doc, "finance_books").iter().enumerate() {
+            let Some(bk) = id(r, "finance_book") else { continue };
+            if !seen.insert(bk) {
+                errors.push(FieldError::new("finance_book", "is listed twice").in_row("finance_books", i));
+            }
+            if !b(doc, "calculate_depreciation") {
+                errors.push(FieldError::new("finance_book", "the asset does not depreciate").in_row("finance_books", i));
+                continue;
+            }
+            match plan_for(doc, Some(bk), co.precision) {
+                Err(e) => errors.extend(e.into_iter().map(|f| f.in_row("finance_books", i))),
+                Ok(plan) if plan.method == Method::Manual => {
+                    errors.push(FieldError::new("depreciation_method", "a finance book needs a generated method").in_row("finance_books", i));
+                }
+                Ok(plan) => {
+                    let seen_in = as_in(doc, Some(bk));
+                    if d(&seen_in, "opening_accumulated_depreciation") + plan.salvage > gross {
+                        errors.push(FieldError::new("salvage_value", "cannot exceed the net book value").in_row("finance_books", i));
+                    }
+                }
+            }
+        }
         if errors.is_empty() { Ok(()) } else { Err(Error::Validation(errors)) }
     }
 
@@ -663,8 +1021,10 @@ impl DocHook for AssetHook {
     async fn on_cancel(&self, hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
         let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
         let (mut current, old) = open(hc.kernel, hc.ctx, hc.tx, asset).await?;
-        while let Some(i) = schedule_rows(&current).iter().rposition(|r| b(r, "booked")) {
-            unbook(hc.kernel, hc.ctx, hc.tx, &mut current, i).await?;
+        for bk in every(&current) {
+            while let Some(i) = rows_in(&current, bk).iter().rposition(|r| b(r, "booked")) {
+                unbook(hc.kernel, hc.ctx, hc.tx, &mut current, bk, i).await?;
+            }
         }
         let co = company(hc.kernel, hc.ctx, hc.tx, id(doc, "company").unwrap_or_default()).await?;
         ledger::reverse(hc.tx, hc.ctx, "Asset", asset, hc.ctx.today(), co.precision).await?;
@@ -677,6 +1037,16 @@ impl DocHook for AssetHook {
     /// thing, not part of what was booked, so they stay editable on a submitted asset (which the
     /// form cannot do). A field left out of the parameters stays as it is; an empty one is cleared.
     async fn action(&self, hc: &mut HookCtx<'_>, name: &str, doc: &Doc, params: &Value) -> Result<Option<Value>> {
+        if name == "split_asset" {
+            let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
+            let qty = params
+                .get("split_qty")
+                .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|t| t.trim().parse().ok())))
+                .ok_or_else(|| Error::field("split_qty", "is required"))?;
+            let new = split(hc.kernel, hc.ctx, hc.tx, asset, qty).await?;
+            let number = s(&new, "number").unwrap_or_default().to_string();
+            return Ok(Some(json!({"message": format!("Split off as asset {number}"), "asset": new.get("id"), "number": number})));
+        }
         if name != "update_details" {
             return Ok(None);
         }
