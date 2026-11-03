@@ -1,6 +1,6 @@
 id: assets
 name: Assets
-version: 0.2.0
+version: 0.2.1
 publisher: cbferrum
 summary: "Fixed assets: categories, depreciation schedules and posting, movements, maintenance, revaluation and disposal"
 description: README.md
