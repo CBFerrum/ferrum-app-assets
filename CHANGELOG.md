@@ -1,6 +1,6 @@
 # Changelog
 
-## Assets 0.3.0: finance books keep their own values
+## Assets 0.3.0: finance books keep their own values, and repairs use parts
 
 What finance books are mostly for: an asset depreciated one way for IFRS and another for tax
 (FERRUM-ASSETS-002).
@@ -19,6 +19,15 @@ What finance books are mostly for: an asset depreciated one way for IFRS and ano
   each book's net book value and gain. Cancelling it undoes all of that.
 - The fixed asset register and the depreciation schedule take a finance book and show its values
   for the assets it depreciates its own way, and the common values for the rest.
+
+Repairs:
+
+- A capitalized repair can add to the asset's useful life, in months that make whole depreciation
+  periods for the asset and for each finance book that keeps its own; the rest of each schedule is
+  re-planned over the longer life.
+- A repair lists the parts it used. They leave stock in one material issue on its completion date,
+  booked to the repair's expense account, and their value is part of the repair's cost (capitalized
+  with it, when it is). Cancelling the repair puts the parts back and takes the year away again.
 
 The asset's single Finance Book field, a label, is gone: an asset is in every book, and in the books
 it lists with values of their own. Needs ERP 0.6.0 or later.

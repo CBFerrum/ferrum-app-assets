@@ -66,6 +66,15 @@
     - {name: remarks, type: text}
   list: {columns: [number, asset, adjustment_date, current_asset_value, new_asset_value], sort: adjustment_date desc}
 
+- name: AssetRepairItem
+  label: Asset Repair Part
+  kind: child
+  fields:
+    - {name: item, type: link, to: Item, required: true, link_filters: {is_stock_item: true}, in_list: true}
+    - {name: warehouse, type: link, to: Warehouse, required: true, link_filters: {is_group: false}, in_list: true}
+    - {name: qty, type: decimal, required: true, min: "0.000000001", in_list: true}
+    - {name: amount, type: currency, read_only: true, no_copy: true, in_list: true, description: What it was worth as it left stock}
+
 - name: AssetRepair
   label: Asset Repair
   kind: document
@@ -84,12 +93,20 @@
     - {name: actions_performed, type: text}
     - {name: repair_cost, type: currency, min: "0", default: 0, in_list: true}
     - {name: capitalize_repair_cost, type: check, description: Add the cost to the asset's value and depreciate it over the rest of its life}
+    - {name: increase_in_asset_life, type: int, min: 0, default: 0, label: Increase in Asset Life (Months), visible_if: "doc.capitalize_repair_cost",
+       description: "Months the repair adds to the asset's useful life: whole depreciation periods, for the asset and for each finance book that keeps its own"}
+    - {name: consumed_items, type: table, of: AssetRepairItem, label: Parts Used, description: "Taken from stock when the repair is submitted, booked to the expense account; their value adds to the repair's cost"}
+    - {name: parts_cost, type: currency, read_only: true, no_copy: true, label: Cost of Parts}
+    - {name: total_repair_cost, type: currency, read_only: true, no_copy: true, in_list: true, description: The repair cost and the parts}
+    - {name: stock_entry, type: link, to: StockEntry, read_only: true, no_copy: true, description: The material issue that took the parts}
     - {name: purchase_invoice, type: link, to: PurchaseInvoice, description: The invoice that billed the repair}
-    - {name: expense_account, type: link, to: Account, link_filters: {is_group: false}, required_if: "doc.capitalize_repair_cost", description: "Where the repair cost was booked (default: the purchase invoice's account); capitalizing credits it"}
+    - {name: expense_account, type: link, to: Account, link_filters: {is_group: false}, required_if: "doc.capitalize_repair_cost || size(doc.consumed_items) > 0",
+       description: "Where the repair cost was booked (default: the purchase invoice's account) and the parts go; capitalizing credits it"}
     - {name: cost_center, type: link, to: CostCenter, link_filters: {is_group: false}}
   rules:
     - {name: completion_after_failure, check: "doc.completion_date == null || doc.completion_date >= doc.failure_date", message: "The completion date cannot be before the failure date"}
-    - {name: capitalized_cost, check: "!doc.capitalize_repair_cost || doc.repair_cost > 0.0", message: "A capitalized repair needs a cost"}
+    - {name: capitalized_cost, check: "!doc.capitalize_repair_cost || doc.repair_cost > 0.0 || size(doc.consumed_items) > 0", message: "A capitalized repair needs a cost or parts"}
+    - {name: life_needs_capitalizing, check: "doc.increase_in_asset_life == null || doc.increase_in_asset_life == 0 || doc.capitalize_repair_cost", message: "Only a capitalized repair extends the asset's life"}
   list: {columns: [number, asset, failure_date, repair_status, repair_cost], sort: failure_date desc}
 
 - name: AssetMaintenanceTask

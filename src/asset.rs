@@ -92,7 +92,7 @@ pub(crate) fn books(doc: &Doc) -> Vec<Uuid> {
 }
 
 /// The asset's own depreciation, then each finance book's.
-fn every(doc: &Doc) -> Vec<Book> {
+pub(crate) fn every(doc: &Doc) -> Vec<Book> {
     std::iter::once(None).chain(books(doc).into_iter().map(Some)).collect()
 }
 
@@ -171,7 +171,7 @@ fn row_day(r: &Doc) -> NaiveDate {
 /// finance book made alone.
 async fn changes(tx: &mut Tx, tenant: Uuid, asset: Uuid) -> Result<(Decimal, Decimal, HashMap<Uuid, Decimal>)> {
     let (repairs, adjustments): (Decimal, Decimal) = sqlx::query_as(
-        "select coalesce((select sum(repair_cost) from e_asset_repair where tenant_id = $1 and asset = $2 and docstatus = 1 and capitalize_repair_cost), 0), \
+        "select coalesce((select sum(repair_cost + coalesce(parts_cost, 0)) from e_asset_repair where tenant_id = $1 and asset = $2 and docstatus = 1 and capitalize_repair_cost), 0), \
          coalesce((select sum(difference_amount) from e_asset_value_adjustment where tenant_id = $1 and asset = $2 and docstatus = 1 and finance_book is null), 0)",
     )
     .bind(tenant)
@@ -508,6 +508,44 @@ pub(crate) async fn replan_in(tx: &mut Tx, ctx: &Ctx, doc: &mut Doc, book: Book,
     let mut list = booked;
     list.extend(fresh.into_iter().map(|(on, a)| new_row(on, a)));
     put_in(doc, book, list);
+    Ok(())
+}
+
+/// Adds `months` (fewer when negative) to the useful life of the asset and of each finance book
+/// that keeps its own depreciation, in whole periods of each; the caller re-plans.
+pub(crate) fn extend_life(doc: &mut Doc, months: i64) -> Result<()> {
+    if months == 0 {
+        return Ok(());
+    }
+    if !b(doc, "calculate_depreciation") || s(doc, "depreciation_method") == Some("Manual") {
+        return Err(Error::field("increase_in_asset_life", "only a generated depreciation plan is extended (a manual schedule is changed by hand)"));
+    }
+    let mut lives = Vec::new();
+    for bk in every(doc) {
+        let seen = as_in(doc, bk);
+        let frequency = int(&seen, "frequency_of_depreciation").max(1);
+        let whose = if bk.is_some() { "a finance book's" } else { "the asset's" };
+        if months % frequency != 0 {
+            return Err(Error::field("increase_in_asset_life", format!("{} months is not a whole number of {whose} {frequency}-month periods", months.abs())));
+        }
+        let periods = int(&seen, "total_number_of_depreciations") + months / frequency;
+        if periods < 1 {
+            return Err(Error::field("increase_in_asset_life", format!("would leave {whose} life without a period")));
+        }
+        lives.push((bk, periods));
+    }
+    for (bk, periods) in lives {
+        match bk {
+            None => set(doc, "total_number_of_depreciations", periods),
+            Some(_) => {
+                let mut list = rows(doc, "finance_books");
+                for r in list.iter_mut().filter(|r| id(r, "finance_book") == bk) {
+                    set(r, "total_number_of_depreciations", periods);
+                }
+                set(doc, "finance_books", Value::Array(list.into_iter().map(Value::Object).collect()));
+            }
+        }
+    }
     Ok(())
 }
 
