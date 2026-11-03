@@ -11,15 +11,6 @@
     - {name: address, type: text}
   list: {columns: [location_name, parent_location, is_group], sort: location_name asc}
 
-- name: FinanceBook
-  label: Finance Book
-  kind: master
-  module: assets
-  title_field: finance_book_name
-  description: A label for the books an asset is kept in (e.g. Tax Book); reports filter by it.
-  fields:
-    - {name: finance_book_name, type: data, required: true, unique: true, in_list: true}
-
 - name: AssetCategoryAccount
   label: Asset Category Account
   kind: child
