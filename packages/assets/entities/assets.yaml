@@ -155,6 +155,7 @@
     - {name: status, type: select, options: [Draft, Submitted, Partially Depreciated, Fully Depreciated, In Maintenance, Out of Order, Sold, Scrapped, Cancelled], default: Draft, read_only: true, no_copy: true, in_list: true, in_filter: true}
     - {name: disposal, type: link, to: AssetDisposal, read_only: true, no_copy: true}
     - {name: disposal_date, type: date, read_only: true, no_copy: true}
+    - {name: split_from, type: link, to: Asset, read_only: true, no_copy: true, in_filter: true, description: The grouped asset this one was split off}
     - {name: description, type: text}
   form:
     - {label: Asset, fields: [asset_name, item, asset_category, company, currency, location, custodian, expected_return_date, cost_center, asset_quantity, status]}
@@ -162,7 +163,7 @@
     - {label: Purchase, fields: [purchase_date, available_for_use_date, gross_purchase_amount, is_existing_asset, purchase_invoice, opening_accumulated_depreciation, opening_number_of_booked_depreciations]}
     - {label: Depreciation, fields: [calculate_depreciation, depreciation_method, total_number_of_depreciations, frequency_of_depreciation, rate_of_depreciation, start_convention, depreciation_start_date, salvage_value, schedule]}
     - {label: Finance Books, collapsible: true, fields: [finance_books, book_schedule]}
-    - {label: Values, fields: [total_asset_cost, additional_asset_cost, value_adjustments, accumulated_depreciation, value_after_depreciation, next_depreciation_date, disposal, disposal_date]}
+    - {label: Values, fields: [total_asset_cost, additional_asset_cost, value_adjustments, accumulated_depreciation, value_after_depreciation, next_depreciation_date, disposal, disposal_date, split_from]}
     - {label: Verification, fields: [last_verified_date, next_verification_date, verification_result]}
     - {label: Accounts, collapsible: true, fields: [fixed_asset_account, accumulated_depreciation_account, depreciation_expense_account]}
     - {label: More, collapsible: true, fields: [description]}
@@ -170,6 +171,12 @@
     - {name: positive_cost, check: "doc.gross_purchase_amount > 0.0", message: "Gross purchase amount must be greater than zero"}
     - {name: available_after_purchase, check: "doc.available_for_use_date == null || doc.purchase_date == null || doc.available_for_use_date >= doc.purchase_date", message: "The available-for-use date cannot be before the purchase date"}
   actions:
+    - name: split_asset
+      label: Split Asset
+      docstatus: [1]
+      permission: write
+      params:
+        - {name: split_qty, label: Units to Split Off, type: int, required: true}
     - name: update_details
       label: Edit Details
       docstatus: [1]

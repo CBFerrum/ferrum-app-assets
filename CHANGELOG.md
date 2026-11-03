@@ -1,6 +1,6 @@
 # Changelog
 
-## Assets 0.3.0: finance books keep their own values, and repairs use parts
+## Assets 0.3.0: finance books keep their own values; repairs use parts; grouped assets split
 
 What finance books are mostly for: an asset depreciated one way for IFRS and another for tax
 (FERRUM-ASSETS-002).
@@ -28,6 +28,13 @@ Repairs:
 - A repair lists the parts it used. They leave stock in one material issue on its completion date,
   booked to the repair's expense account, and their value is part of the repair's cost (capitalized
   with it, when it is). Cancelling the repair puts the parts back and takes the year away again.
+
+A grouped asset (ten chairs on one line, say) can be split: Split Asset takes some of its units into
+an asset of their own, with their share of its cost, salvage value, opening depreciation and every
+schedule row in every book; the asset keeps what rounding leaves. Depreciation booked before the
+split stays booked by the entries that booked it, which the two assets share, so neither undoes it
+(neither is cancelled, nor disposed of on a day before it). An asset whose value a repair or an
+adjustment changed is not split.
 
 The asset's single Finance Book field, a label, is gone: an asset is in every book, and in the books
 it lists with values of their own. Needs ERP 0.6.0 or later.
