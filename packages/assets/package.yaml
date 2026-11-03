@@ -1,5 +1,5 @@
 package: assets
-version: 0.1.1
+version: 0.2.0
 label: Assets
 description: Fixed assets - categories with per-company accounts, depreciation schedules posted to the ledger, movements and custody, value adjustments, repairs, maintenance plans, sale and scrapping, capitalization from purchase invoices.
 depends: [accounting, buying, selling]

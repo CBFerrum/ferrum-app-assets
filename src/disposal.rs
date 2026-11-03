@@ -135,9 +135,8 @@ impl DocHook for DisposalHook {
         in_service(&current)?;
         let co = company(hc.kernel, hc.ctx, hc.tx, id(&current, "company").unwrap_or_default()).await?;
         let snapshot = asset::depreciate_to_disposal(hc.kernel, hc.ctx, hc.tx, &mut current, on, me, co.precision).await?;
-        let value = asset::net_book_value(hc.tx, hc.ctx, &current).await?;
-        let accumulated = d(&current, "opening_accumulated_depreciation")
-            + rows(&current, "schedule").iter().filter(|r| b(r, "booked")).map(|r| d(r, "depreciation_amount")).sum::<Decimal>();
+        let value = asset::net_book_value(hc.tx, hc.ctx, &current, None).await?;
+        let accumulated = asset::accumulated(&current, None);
         let cost = value + accumulated;
         let proceeds = match s(doc, "disposal_type") {
             Some("Sell") => {
@@ -175,7 +174,37 @@ impl DocHook for DisposalHook {
             }));
         }
         ledger::post(hc.tx, hc.ctx, entry, co.precision).await?;
+        // A finance book that kept its own depreciation (or value) leaves the difference from the
+        // common books on its accounts: its own entry clears it into its gain or loss.
+        let mut book_values = Vec::new();
+        for bk in asset::books(&current) {
+            let value_in = asset::net_book_value(hc.tx, hc.ctx, &current, Some(bk)).await?;
+            let more_depreciation = asset::accumulated(&current, Some(bk)) - accumulated;
+            let more_cost = value_in + asset::accumulated(&current, Some(bk)) - cost;
+            let more_gain = more_depreciation - more_cost;
+            let mut entry = Entry::new(co.id, on, "AssetDisposal", me, s(doc, "number").map(str::to_string));
+            entry.memo = Some(format!("{memo}, in a finance book of its own"));
+            entry.finance_book = Some(bk);
+            if !more_depreciation.is_zero() {
+                let acc = match id(&current, "accumulated_depreciation_account") {
+                    Some(acc) => acc,
+                    None => accounts.accumulated()?,
+                };
+                entry.lines.push(Line::new(acc, more_depreciation, &co.currency_code).cost_center(cc).remarks(memo.clone()));
+            }
+            if !more_cost.is_zero() {
+                entry.lines.push(Line::new(fixed_asset, -more_cost, &co.currency_code).cost_center(cc).remarks(memo.clone()));
+            }
+            if !more_gain.is_zero() {
+                entry.lines.push(Line::new(accounts.disposal()?, -more_gain, &co.currency_code).cost_center(cc).remarks(memo.clone()));
+            }
+            if !entry.lines.is_empty() {
+                ledger::post(hc.tx, hc.ctx, entry, co.precision).await?;
+            }
+            book_values.push(json!({"finance_book": bk.to_string(), "net_book_value": money(value_in), "gain_or_loss": money(proceeds - value_in)}));
+        }
         let mut v = Doc::new();
+        v.insert("book_values".into(), if book_values.is_empty() { Value::Null } else { Value::Array(book_values) });
         v.insert("gross_amount".into(), money(cost));
         v.insert("accumulated_depreciation".into(), money(accumulated));
         v.insert("net_book_value".into(), money(value));
@@ -403,8 +432,10 @@ impl DocHook for JournalEntryGuard {
         }
         let Some(je) = id(doc, "id") else { return Ok(()) };
         let asset: Option<String> = sqlx::query_scalar(
-            "select coalesce(a.number, a.id::text) from e_asset__schedule r join e_asset a on a.tenant_id = r.tenant_id and a.id = r.parent_id \
-             where r.tenant_id = $1 and r.journal_entry = $2 limit 1",
+            "select coalesce(a.number, a.id::text) from e_asset a where a.tenant_id = $1 and ( \
+               exists (select 1 from e_asset__schedule r where r.tenant_id = a.tenant_id and r.parent_id = a.id \
+                 and (r.journal_entry = $2 or r.book_entries @> jsonb_build_array(jsonb_build_object('journal_entry', $2::text)))) \
+               or exists (select 1 from e_asset__book_schedule r where r.tenant_id = a.tenant_id and r.parent_id = a.id and r.journal_entry = $2)) limit 1",
         )
         .bind(hc.ctx.tenant)
         .bind(je)

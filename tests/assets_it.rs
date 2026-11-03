@@ -127,6 +127,20 @@ impl T {
         .await
         .unwrap()
     }
+    /// Debit minus credit on an account (by name) in one finance book's own entries.
+    async fn gl_in_book(&self, account: &str, book: Uuid) -> Decimal {
+        let mut tx = self.k.db.tenant_tx(self.tenant).await.unwrap();
+        sqlx::query_scalar(
+            "select coalesce(sum(l.debit - l.credit), 0) from journal_line l join journal_entry e on e.tenant_id = l.tenant_id and e.id = l.entry_id \
+             join e_account a on a.tenant_id = l.tenant_id and a.id = l.account_id where l.tenant_id = $1 and a.account_name = $2 and e.finance_book_id = $3",
+        )
+        .bind(self.tenant)
+        .bind(account)
+        .bind(book)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap()
+    }
     async fn depreciation_entries(&self) -> i64 {
         self.count("select count(*) from e_journal_entry where tenant_id = $1 and entry_type = 'Depreciation' and docstatus = 1 and $2::uuid is null", None)
             .await
@@ -1016,6 +1030,249 @@ async fn scenario() {
     assert_eq!(dec(&gains["totals"]["gain_or_loss"]), -t.gl("Gain/Loss on Asset Disposal").await, "the report ties to the gain/loss account");
     let denied = ferrum_domain::reports::run(&t.k, &bob, "asset_disposal_gain_loss", &HashMap::new()).await;
     assert!(matches!(denied, Err(Error::Forbidden(_))), "{denied:?}");
+
+    // ───────────── finance books keep their own values ─────────────
+    // A mill of 12,000 from 2021: in the common books straight line over four years (3,000 a year);
+    // in the tax book over two, half-yearly (3,000 every six months).
+    let tax = uid(&t.insert(&a, "FinanceBook", json!({"finance_book_name": "Tax"})).await);
+    let mill = |books: Value| {
+        json!({"item": press_item.to_string(), "asset_name": "Mill", "company": cid.to_string(), "location": plant.to_string(), "is_existing_asset": true,
+               "purchase_date": "2021-01-01", "gross_purchase_amount": "12000", "depreciation_method": "Straight Line", "total_number_of_depreciations": 4,
+               "frequency_of_depreciation": 12, "start_convention": "Full First Period", "finance_books": books})
+    };
+    let twice = t.k.insert(&a, "Asset", obj(mill(json!([{"finance_book": tax.to_string()}, {"finance_book": tax.to_string()}])))).await;
+    assert!(matches!(twice, Err(ref e) if validation(e, "listed twice")), "{twice:?}");
+    let draft = t.insert(&a, "Asset", mill(json!([{"finance_book": tax.to_string(), "frequency_of_depreciation": 6}]))).await;
+    let books_of = |d: &Doc| -> Vec<(String, Decimal, bool)> {
+        rows(d, "book_schedule")
+            .iter()
+            .map(|r| (r["schedule_date"].as_str().unwrap().to_string(), dec(&r["depreciation_amount"]), r["booked"] == json!(true)))
+            .collect()
+    };
+    assert_eq!(rows(&draft, "finance_books")[0]["depreciation_start_date"], json!("2021-06-30"), "the end of the book's first half year");
+    assert_eq!(amounts(&draft), [n("3000"), n("3000"), n("3000"), n("3000")]);
+    assert_eq!(
+        books_of(&draft),
+        [
+            ("2021-06-30".into(), n("3000"), false),
+            ("2021-12-31".into(), n("3000"), false),
+            ("2022-06-30".into(), n("3000"), false),
+            ("2022-12-31".into(), n("3000"), false)
+        ]
+    );
+    let mill = uid(&draft);
+    t.submit(&manager, "Asset", mill).await;
+    // Scrapped on 30 September 2022. The common books: 3,000 for 2021 and 3,000 × 273/365 = 2,243.84
+    // for 2022, leaving 6,756.16. The tax book: three half years and 3,000 × 92/184 = 1,500, leaving
+    // 1,500. Its own entry takes the 5,256.16 it depreciated beyond the common books out of the loss.
+    let scrap = t.insert(&manager, "AssetDisposal", json!({"asset": mill.to_string(), "disposal_type": "Scrap", "disposal_date": "2022-09-30"})).await;
+    let scrap = t.submit(&manager, "AssetDisposal", uid(&scrap)).await;
+    assert_eq!((dec(&scrap["accumulated_depreciation"]), dec(&scrap["gain_or_loss"])), (n("5243.84"), n("-6756.16")));
+    let in_tax = &scrap["book_values"][0];
+    assert_eq!((in_tax["finance_book"].clone(), dec(&in_tax["net_book_value"]), dec(&in_tax["gain_or_loss"])), (json!(tax.to_string()), n("1500"), n("-1500")));
+    let m = t.get("Asset", mill).await;
+    assert_eq!(
+        books_of(&m).iter().map(|r| (r.0.as_str(), r.1, r.2)).collect::<Vec<_>>(),
+        [("2021-06-30", n("3000"), true), ("2021-12-31", n("3000"), true), ("2022-06-30", n("3000"), true), ("2022-09-30", n("1500"), true)]
+    );
+    let tax_only = |account: &'static str| {
+        let t = &t;
+        async move { t.gl_in_book(account, tax).await }
+    };
+    // In the tax book alone: the common depreciation out (5,243.84), its own in (10,500), and its own disposal entry.
+    assert_eq!(
+        (tax_only("Depreciation").await, tax_only("Accumulated Depreciation").await, tax_only("Gain/Loss on Asset Disposal").await),
+        (n("5256.16"), n("0"), n("-5256.16"))
+    );
+    // Undone: what the scrap booked to its date stays booked, the rest of each plan comes back.
+    t.cancel(&manager, "AssetDisposal", uid(&scrap)).await;
+    let m = t.get("Asset", mill).await;
+    assert_eq!(books_of(&m).iter().filter(|r| r.2).count(), 3);
+    assert_eq!((dec(&m["value_after_depreciation"]), dec(&rows(&m, "finance_books")[0]["value_after_depreciation"])), (n("9000"), n("3000")));
+    assert_eq!((tax_only("Depreciation").await, tax_only("Gain/Loss on Asset Disposal").await), (n("6000"), n("0")));
+    // Impaired in the tax book alone to 2,000: the 1,000 is the tax book's, and its last half year is 2,000.
+    let elsewhere =
+        t.k.insert(
+            &manager,
+            "AssetValueAdjustment",
+            obj(json!({"asset": van.to_string(), "finance_book": tax.to_string(), "adjustment_date": "2024-12-31", "new_asset_value": "1000", "difference_account": admin_expenses.to_string()})),
+        )
+        .await;
+    assert!(matches!(elsewhere, Err(ref e) if validation(e, "no depreciation of its own")), "{elsewhere:?}");
+    let impair = t
+        .insert(
+            &manager,
+            "AssetValueAdjustment",
+            json!({"asset": mill.to_string(), "finance_book": tax.to_string(), "adjustment_date": "2022-07-31", "new_asset_value": "2000", "difference_account": admin_expenses.to_string()}),
+        )
+        .await;
+    assert_eq!(dec(&impair["current_asset_value"]), n("3000"), "the value in the tax book");
+    let impair = t.submit(&manager, "AssetValueAdjustment", uid(&impair)).await;
+    assert_eq!(dec(&impair["difference_amount"]), n("-1000"));
+    let m = t.get("Asset", mill).await;
+    assert_eq!(books_of(&m).last().map(|r| r.1), Some(n("2000")));
+    assert_eq!(dec(&m["value_after_depreciation"]), n("9000"), "the common books are as they were");
+    // The upkeep books the rest in both: 12,000 in the common books, 9,000 + 2,000 in the tax book.
+    t.upkeep().await;
+    let m = t.get("Asset", mill).await;
+    let tax_row = &rows(&m, "finance_books")[0];
+    assert_eq!(
+        (dec(&m["accumulated_depreciation"]), dec(&tax_row["accumulated_depreciation"]), dec(&tax_row["value_after_depreciation"]), m["status"].clone()),
+        (n("12000"), n("11000"), n("0"), json!("Fully Depreciated"))
+    );
+    assert_eq!(
+        (
+            tax_only("Depreciation").await,
+            tax_only("Accumulated Depreciation").await,
+            tax_only("Plant and Machinery").await,
+            tax_only("Administrative Expenses").await
+        ),
+        (n("-1000"), n("1000"), n("-1000"), n("1000"))
+    );
+    let mill_in = |book: Option<Uuid>| {
+        let mut params = p(&[("as_of", "2022-06-30"), ("asset_category", &presses.to_string())]);
+        params.extend(book.map(|b| ("finance_book", b.to_string())));
+        params
+    };
+    for (book, values) in [(None, ["12000", "3000", "9000"]), (Some(tax), ["12000", "9000", "3000"])] {
+        let reg = t.report(&accountant, "fixed_asset_register", &mill_in(book)).await;
+        let row = reg["rows"].as_array().unwrap().iter().find(|r| r["asset_name"] == json!("Mill")).cloned().unwrap_or_else(|| panic!("{}", reg["rows"]));
+        assert_eq!([dec(&row["cost"]), dec(&row["accumulated_depreciation"]), dec(&row["net_book_value"])], values.map(n), "{book:?}");
+    }
+    let sched = t
+        .report(
+            &a,
+            "asset_depreciation_schedule",
+            &p(&[("from_date", "2021-01-01"), ("to_date", "2024-12-31"), ("asset", &mill.to_string()), ("finance_book", &tax.to_string())]),
+        )
+        .await;
+    let planned: Vec<Decimal> = sched["rows"].as_array().unwrap().iter().map(|r| dec(&r["planned_amount"])).collect();
+    assert_eq!(planned, [n("3000"), n("3000"), n("3000"), n("2000")], "the tax book's own rows");
+    // A manual plan in the common books stays as entered when only the tax book changes.
+    let lathe2 = |method: Value| {
+        json!({"item": press_item.to_string(), "asset_name": "Lathe", "company": cid.to_string(), "location": plant.to_string(), "is_existing_asset": true,
+               "purchase_date": "2023-01-01", "gross_purchase_amount": "1000", "depreciation_method": "Manual",
+               "schedule": [{"schedule_date": "2023-12-31", "depreciation_amount": "500"}, {"schedule_date": "2024-12-31", "depreciation_amount": "500"}],
+               "finance_books": [{"finance_book": tax.to_string(), "depreciation_method": method, "total_number_of_depreciations": 2, "frequency_of_depreciation": 12}]})
+    };
+    let manual_book = t.k.insert(&a, "Asset", obj(lathe2(Value::Null))).await;
+    assert!(matches!(manual_book, Err(ref e) if validation(e, "generated method")), "{manual_book:?}");
+    let lathe2 = uid(&t.insert(&a, "Asset", lathe2(json!("Straight Line"))).await);
+    t.submit(&manager, "Asset", lathe2).await;
+    let impair = t
+        .insert(
+            &manager,
+            "AssetValueAdjustment",
+            json!({"asset": lathe2.to_string(), "finance_book": tax.to_string(), "adjustment_date": "2023-01-31", "new_asset_value": "600", "difference_account": admin_expenses.to_string()}),
+        )
+        .await;
+    t.submit(&manager, "AssetValueAdjustment", uid(&impair)).await;
+    let l2 = t.get("Asset", lathe2).await;
+    assert_eq!(amounts(&l2), [n("500"), n("500")], "the common books' manual plan is untouched");
+    assert_eq!(books_of(&l2).iter().map(|r| r.1).collect::<Vec<_>>(), [n("300"), n("300")], "the tax book spreads its 600");
+
+    // ───────────── a repair that uses parts and adds a year ─────────────
+    // A compressor of 4,000 from 2025: four years in the common books, two in the tax book. Mended
+    // in June 2025 for 300 and two belts from stock (100 each); the 500 is capitalized and adds a
+    // year: 4,500 over five years (900) and over three in the tax book (1,500).
+    let belt = uid(&t
+        .insert(&a, "Item", json!({"item_code": "BELT", "item_name": "belt", "item_group": products["id"], "stock_uom": nos["id"], "is_stock_item": true}))
+        .await);
+    let stores = uid(&t.find_one("Warehouse", json!({"warehouse_name": "Stores", "company": cid.to_string()})).await);
+    let receipt = json!({"company": cid.to_string(), "purpose": "Material Receipt", "posting_date": "2025-01-01",
+                         "items": [{"item": belt.to_string(), "target_warehouse": stores.to_string(), "qty": "5", "basic_rate": "100", "expense_account": opening_equity.to_string()}]});
+    t.submit(&a, "StockEntry", uid(&t.insert(&a, "StockEntry", receipt).await)).await;
+    let compressor = t
+        .insert(
+            &a,
+            "Asset",
+            json!({"item": press_item.to_string(), "asset_name": "Compressor", "company": cid.to_string(), "location": plant.to_string(), "is_existing_asset": true,
+                   "purchase_date": "2025-01-01", "gross_purchase_amount": "4000", "depreciation_method": "Straight Line", "total_number_of_depreciations": 4,
+                   "frequency_of_depreciation": 12, "start_convention": "Full First Period",
+                   "finance_books": [{"finance_book": tax.to_string(), "total_number_of_depreciations": 2}]}),
+        )
+        .await;
+    let compressor = uid(&compressor);
+    t.submit(&manager, "Asset", compressor).await;
+    let mend = |months: i64| {
+        json!({"asset": compressor.to_string(), "failure_date": "2025-06-01", "repair_status": "Completed", "completion_date": "2025-06-30",
+               "repair_cost": "300", "capitalize_repair_cost": true, "expense_account": admin_expenses.to_string(), "increase_in_asset_life": months,
+               "consumed_items": [{"item": belt.to_string(), "warehouse": stores.to_string(), "qty": "2"}]})
+    };
+    let odd = t.k.insert(&manager, "AssetRepair", obj(mend(18))).await;
+    assert!(matches!(odd, Err(ref e) if validation(e, "whole number")), "18 months is not whole years: {odd:?}");
+    // Six months fit a pump's half years but not its tax book's years.
+    let pump = t
+        .insert(
+            &a,
+            "Asset",
+            json!({"item": press_item.to_string(), "asset_name": "Pump", "company": cid.to_string(), "location": plant.to_string(), "is_existing_asset": true,
+                   "purchase_date": "2025-01-01", "gross_purchase_amount": "1000", "depreciation_method": "Straight Line", "total_number_of_depreciations": 4,
+                   "frequency_of_depreciation": 6, "start_convention": "Full First Period",
+                   "finance_books": [{"finance_book": tax.to_string(), "total_number_of_depreciations": 2, "frequency_of_depreciation": 12}]}),
+        )
+        .await;
+    t.submit(&manager, "Asset", uid(&pump)).await;
+    let mut half = mend(6);
+    half["asset"] = json!(pump["id"]);
+    half["consumed_items"] = json!([]);
+    let half = t.k.insert(&manager, "AssetRepair", obj(half)).await;
+    assert!(matches!(half, Err(ref e) if validation(e, "finance book's 12-month")), "{half:?}");
+    let repair = uid(&t.insert(&manager, "AssetRepair", mend(12)).await);
+    let repair_doc = t.submit(&manager, "AssetRepair", repair).await;
+    assert_eq!((dec(&repair_doc["parts_cost"]), dec(&repair_doc["total_repair_cost"])), (n("200"), n("500")));
+    assert_eq!(dec(&rows(&repair_doc, "consumed_items")[0]["amount"]), n("200"));
+    let issue = t.get("StockEntry", repair_doc["stock_entry"].as_str().unwrap().parse().unwrap()).await;
+    assert_eq!((issue["purpose"].clone(), issue["docstatus"].clone()), (json!("Material Issue"), json!(1)));
+    let c = t.get("Asset", compressor).await;
+    assert_eq!((c["total_number_of_depreciations"].clone(), rows(&c, "finance_books")[0]["total_number_of_depreciations"].clone()), (json!(5), json!(3)));
+    assert_eq!(dec(&c["total_asset_cost"]), n("4500"));
+    assert_eq!(amounts(&c), [n("900"); 5]);
+    assert_eq!(books_of(&c).iter().map(|r| r.1).collect::<Vec<_>>(), [n("1500"); 3]);
+    assert_eq!(t.gl_for("Plant and Machinery", &[repair]).await, n("500"), "the repair and its parts go into the asset");
+    // Undone: the year, the cost and the parts all go back.
+    t.cancel(&manager, "AssetRepair", repair).await;
+    let c = t.get("Asset", compressor).await;
+    assert_eq!((c["total_number_of_depreciations"].clone(), rows(&c, "finance_books")[0]["total_number_of_depreciations"].clone()), (json!(4), json!(2)));
+    assert_eq!(amounts(&c), [n("1000"); 4]);
+    assert_eq!(books_of(&c).iter().map(|r| r.1).collect::<Vec<_>>(), [n("2000"); 2]);
+    assert_eq!(t.get("StockEntry", issue["id"].as_str().unwrap().parse().unwrap()).await["docstatus"], json!(2), "the parts went back to stock");
+
+    // ───────────── a grouped asset split ─────────────
+    // Four desks bought together for 4,000 in 2021: ten years in the common books (400 a year), five
+    // in the tax book (800). One is split off: a quarter of everything, booked rows included.
+    let desks = t
+        .insert(
+            &a,
+            "Asset",
+            json!({"item": press_item.to_string(), "asset_name": "Desks", "asset_quantity": 4, "company": cid.to_string(), "location": plant.to_string(),
+                   "is_existing_asset": true, "purchase_date": "2021-01-01", "gross_purchase_amount": "4000", "depreciation_method": "Straight Line",
+                   "total_number_of_depreciations": 10, "frequency_of_depreciation": 12, "start_convention": "Full First Period",
+                   "finance_books": [{"finance_book": tax.to_string(), "total_number_of_depreciations": 5}]}),
+        )
+        .await;
+    let desks = uid(&desks);
+    t.submit(&manager, "Asset", desks).await;
+    t.upkeep().await;
+    let before = t.get("Asset", desks).await;
+    let booked = schedule(&before).iter().filter(|r| r.2).count();
+    assert!(booked >= 5, "2021 to 2025 at least: {booked}");
+    let all = t.k.run_action(&manager, "Asset", desks, "split_asset", json!({"split_qty": 4})).await;
+    assert!(matches!(all, Err(ref e) if validation(e, "from 1 to 3")), "{all:?}");
+    let done = t.k.run_action(&manager, "Asset", desks, "split_asset", json!({"split_qty": 1})).await.expect("split");
+    let one: Uuid = done["asset"].as_str().unwrap().parse().unwrap();
+    let (three, desk) = (t.get("Asset", desks).await, t.get("Asset", one).await);
+    assert_eq!((three["asset_quantity"].clone(), desk["asset_quantity"].clone(), desk["split_from"].clone()), (json!(3), json!(1), json!(desks.to_string())));
+    assert_eq!((dec(&three["gross_purchase_amount"]), dec(&desk["gross_purchase_amount"])), (n("3000"), n("1000")));
+    assert_eq!((amounts(&three), amounts(&desk)), (vec![n("300"); 10], vec![n("100"); 10]));
+    assert_eq!(books_of(&desk).iter().map(|r| r.1).collect::<Vec<_>>(), [n("200"); 5]);
+    assert_eq!(schedule(&desk).iter().filter(|r| r.2).count(), booked, "what was booked stays booked, in both");
+    assert_eq!(dec(&desk["accumulated_depreciation"]), n("100") * Decimal::from(booked as i64));
+    let value = |x: &Doc| dec(&x["value_after_depreciation"]);
+    assert_eq!(value(&three) + value(&desk), value(&before));
+    assert_eq!(desk["status"], json!("Partially Depreciated"));
+    let undo = t.k.cancel(&manager, "Asset", one, None).await;
+    assert!(matches!(undo, Err(Error::Invalid(ref m)) if m.contains("was split")), "booked depreciation is the two assets': {undo:?}");
 
     // ───────────── the books ─────────────
     let tb = t.report(&a, "trial_balance", &[("company", cid.to_string()), ("from_date", "2019-01-01".into()), ("to_date", today.clone())]).await;
