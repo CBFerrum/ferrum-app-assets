@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+Rebuilt with Ferrum-Frontend 80ff179: a field's label names its control for assistive technology, and a record whose title is a link shows that record's title, not its id.
+
 ## Assets 0.3.0: finance books keep their own values; repairs use parts; grouped assets split
 
 What finance books are mostly for: an asset depreciated one way for IFRS and another for tax
