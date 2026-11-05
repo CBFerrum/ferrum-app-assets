@@ -299,6 +299,7 @@ CHANGELOG.md  what changed in each version
 
 | Version | Highlights |
 |---|---|
+| **0.3.2** | Rebuilt with Ferrum-Frontend daeadda: actions say what they did. |
 | **0.3.1** | Rebuilt with Ferrum-Frontend 80ff179: labels name their fields, and linked titles show their titles. |
 | **0.3.0** | Finance books keep their own values: an asset lists the books that depreciate it their own way (method, life, frequency, salvage), each book books its own schedule and the common depreciation is taken out of it, a value adjustment can change one book alone, and a sale or scrap clears each book's difference into that book's gain or loss. The register and the depreciation schedule show a book's values. A repair can add whole periods to the asset's life and use parts from stock, their value part of its cost. A grouped asset splits into two, every figure in proportion. Needs ERP 0.6.0 or later. |
 | **0.2.0** | An interface of its own: an overview of what is owned and what needs a person, a page for every asset, and verifying a room; serial number, warranty, return dates and physical verification. |
