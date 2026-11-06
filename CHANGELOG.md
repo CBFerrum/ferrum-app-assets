@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+Rebuilt with Ferrum-Frontend bb60115: a record page reads an empty number or check as the server does, so an action whose condition needs one shows, and a workspace's settings open as their one record.
+
 ## 0.3.3
 
 Rebuilt with Ferrum-Frontend 00dea07: in a workflow state that names what may change, the other fields show read-only, and the fields the state needs show required.
