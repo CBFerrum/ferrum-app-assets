@@ -7,7 +7,7 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
-import { errorMessage, todayIso } from "@ferrum/client";
+import { errorMessage, todayIso, t } from "@ferrum/client";
 import { EmptyState, ErrorState, Icon, useLiveEntity, useShellTitle } from "@ferrum/kit";
 import { can, useEntityMeta, useMe } from "@ferrum/records";
 import { addMonths, monthEnd, monthStart, relative } from "./dates";
@@ -28,7 +28,7 @@ function SectionError({ error, retry }: { error: unknown; retry: () => void }) {
     <p className="ast-note" role="alert">
       {errorMessage(error)}{" "}
       <button type="button" className="link-btn" onClick={retry}>
-        Try again
+        {t("Try again")}
       </button>
     </p>
   );
@@ -36,7 +36,7 @@ function SectionError({ error, retry }: { error: unknown; retry: () => void }) {
 
 function Skeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <div className="ast-skeleton" role="status" aria-label="Loading">
+    <div className="ast-skeleton" role="status" aria-label={t("Loading")}>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="skeleton" />
       ))}
@@ -104,14 +104,14 @@ function Owned({ by, setBy, rows, loading, error, retry, money, query }: {
   return (
     <section className="card ast-owned" aria-labelledby="ast-owned">
       <div className="card-head">
-        <h2 id="ast-owned">What the company owns</h2>
+        <h2 id="ast-owned">{t("What the company owns")}</h2>
         <span className="spacer" />
-        <div className="segmented" role="group" aria-label="Group by">
+        <div className="segmented" role="group" aria-label={t("Group by")}>
           <button type="button" aria-pressed={by === "asset_category"} onClick={() => setBy("asset_category")}>
-            By category
+            {t("By category")}
           </button>
           <button type="button" aria-pressed={by === "location"} onClick={() => setBy("location")}>
-            By place
+            {t("By place")}
           </button>
         </div>
       </div>
@@ -121,7 +121,7 @@ function Owned({ by, setBy, rows, loading, error, retry, money, query }: {
         ) : loading || !rows ? (
           <Skeleton rows={4} />
         ) : !shown.length ? (
-          <p className="muted">Nothing registered yet.</p>
+          <p className="muted">{t("Nothing registered yet.")}</p>
         ) : (
           <ul className="ast-bars">
             {shown.map((b: Bar) => {
@@ -178,8 +178,8 @@ function Months({ items, today, money, company }: { items: Month[]; today: strin
         })}
       </ol>
       <p className="ast-legend faint">
-        <span className="ast-key ast-key-booked" aria-hidden="true" /> booked <span className="ast-key ast-key-waiting" aria-hidden="true" /> still to book
-        <span className="ast-key ast-key-late" aria-hidden="true" /> overdue <span className="ast-key ast-key-failed" aria-hidden="true" /> could not be booked
+        <span className="ast-key ast-key-booked" aria-hidden="true" /> booked <span className="ast-key ast-key-waiting" aria-hidden="true" /> {t("still to book")}
+        <span className="ast-key ast-key-late" aria-hidden="true" /> overdue <span className="ast-key ast-key-failed" aria-hidden="true" /> {t("could not be booked")}
       </p>
     </>
   );
@@ -204,7 +204,7 @@ function Attention({ groups, loading, error, retry }: { groups: Group[]; loading
   return (
     <section className="card ast-attention" aria-labelledby="ast-attention">
       <div className="card-head">
-        <h2 id="ast-attention">Needs attention</h2>
+        <h2 id="ast-attention">{t("Needs attention")}</h2>
       </div>
       <div className="card-body">
         {error ? <SectionError error={error} retry={retry} /> : null}
@@ -212,8 +212,8 @@ function Attention({ groups, loading, error, retry }: { groups: Group[]; loading
           <Skeleton rows={4} />
         ) : !shown.length ? (
           error ? null : (
-            <EmptyState title="Nothing needs attention" icon="check">
-              Returns, checks, repairs and depreciation are all where they should be.
+            <EmptyState title={t("Nothing needs attention")} icon="check">
+              {t("Returns, checks, repairs and depreciation are all where they should be.")}
             </EmptyState>
           )
         ) : (
@@ -374,35 +374,35 @@ export function Home() {
   const setParam = (name: string, value: string | null) => setSp((p) => { const n = new URLSearchParams(p); if (value) n.set(name, value); else n.delete(name); return n; }, { replace: true });
 
   const body = byCategory.error ? (
-    <ErrorState error={byCategory.error} onRetry={() => void byCategory.refetch()} title="The register could not be loaded" />
+    <ErrorState error={byCategory.error} onRetry={() => void byCategory.refetch()} title={t("The register could not be loaded")} />
   ) : byCategory.data && count === 0 && !byCategory.isFetching && asOf === today ? (
     <EmptyState title={everything ? "No assets yet" : "No assets in your care"} icon="file">
       {everything ? (
         <>
-          <p className="muted">Assets are made when a purchase invoice buys a fixed asset item. Ones you already own are added by hand.</p>
+          <p className="muted">{t("Assets are made when a purchase invoice buys a fixed asset item. Ones you already own are added by hand.")}</p>
           {canAdd && (
             <Link className="btn btn-primary btn-md" to="/e/Asset/new">
               <Icon name="plus" />
-              Add an asset you own
+              {t("Add an asset you own")}
             </Link>
           )}
         </>
       ) : (
-        <p className="muted">Assets handed to you will appear here.</p>
+        <p className="muted">{t("Assets handed to you will appear here.")}</p>
       )}
     </EmptyState>
   ) : (
     <>
-      <section className="ast-tiles" aria-label="Totals">
-        <Tile label="Net book value" value={byCategory.data ? money(totals?.net_book_value) : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${asOf === today ? "" : `, as of ${dayText(asOf)}`}` : undefined} to={registerLink} />
-        <Tile label="Cost" value={byCategory.data ? money(totals?.cost) : <span className="skeleton ast-tile-skel" />} sub="what was paid, with repairs and revaluations" to={registerLink} />
-        <Tile label="Depreciated" value={byCategory.data ? `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${money(totals?.accumulated_depreciation)} of the cost` : undefined} to={registerLink}>
+      <section className="ast-tiles" aria-label={t("Totals")}>
+        <Tile label={t("Net book value")} value={byCategory.data ? money(totals?.net_book_value) : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${asOf === today ? "" : `, as of ${dayText(asOf)}`}` : undefined} to={registerLink} />
+        <Tile label={t("Cost")} value={byCategory.data ? money(totals?.cost) : <span className="skeleton ast-tile-skel" />} sub="what was paid, with repairs and revaluations" to={registerLink} />
+        <Tile label={t("Depreciated")} value={byCategory.data ? `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${money(totals?.accumulated_depreciation)} of the cost` : undefined} to={registerLink}>
           <span className="ast-meter" aria-hidden="true">
             <span style={{ width: `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` }} />
           </span>
         </Tile>
         <Tile
-          label="Depreciation this month"
+          label={t("Depreciation this month")}
           value={thisMonth ? money(thisMonth.total) : plan.error ? "—" : <span className="skeleton ast-tile-skel" />}
           sub={thisMonth ? `${money(thisMonth.booked)} booked so far` : undefined}
           to={`/r/asset_depreciation_schedule?${new URLSearchParams({ ...params, from_date: from, to_date: monthEnd(from), run: "1" })}`}
@@ -422,7 +422,7 @@ export function Home() {
         <Attention groups={groups} loading={!settled} error={failed} retry={retryAttention} />
         <section className="card ast-depreciation" aria-labelledby="ast-depreciation">
           <div className="card-head">
-            <h2 id="ast-depreciation">Depreciation, month by month</h2>
+            <h2 id="ast-depreciation">{t("Depreciation, month by month")}</h2>
           </div>
           <div className="card-body">
             {plan.error ? (
@@ -432,16 +432,16 @@ export function Home() {
             ) : (
               <>
                 <Months items={upcoming} today={today} money={money} company={company.id} />
-                {plan.data.meta?.truncated && <p className="ast-note">There are more periods than a report holds, so the later months are partial. Open a month for its own report.</p>}
+                {plan.data.meta?.truncated && <p className="ast-note">{t("There are more periods than a report holds, so the later months are partial. Open a month for its own report.")}</p>}
               </>
             )}
           </div>
         </section>
         <section className="card ast-maintenance" aria-labelledby="ast-maintenance">
           <div className="card-head">
-            <h2 id="ast-maintenance">Maintenance in the next 30 days</h2>
+            <h2 id="ast-maintenance">{t("Maintenance in the next 30 days")}</h2>
             <span className="spacer" />
-            <Link to={`/r/asset_maintenance_due?${new URLSearchParams({ ...params, as_of: today, days: "90", run: "1" })}`}>All maintenance</Link>
+            <Link to={`/r/asset_maintenance_due?${new URLSearchParams({ ...params, as_of: today, days: "90", run: "1" })}`}>{t("All maintenance")}</Link>
           </div>
           <div className="card-body">
             {due.error ? (
@@ -449,7 +449,7 @@ export function Home() {
             ) : !due.data ? (
               <Skeleton rows={3} />
             ) : !due.data.rows.length ? (
-              <p className="muted">No maintenance is due.</p>
+              <p className="muted">{t("No maintenance is due.")}</p>
             ) : (
               <ul className="ast-lines ast-due">
                 {due.data.rows.slice(0, 6).map((r) => (
@@ -482,7 +482,7 @@ export function Home() {
         </div>
         <div className="ast-tools">
           {many && (
-            <select className="select ast-company" aria-label="Company" value={company.id ?? ""} onChange={(e) => company.choose(e.target.value)}>
+            <select className="select ast-company" aria-label={t("Company")} value={company.id ?? ""} onChange={(e) => company.choose(e.target.value)}>
               {company.all.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.company_name ?? c.id}
@@ -491,19 +491,19 @@ export function Home() {
             </select>
           )}
           <label className="ast-asof">
-            <span className="faint">As of</span>
+            <span className="faint">{t("As of")}</span>
             <input className="input" type="date" max={today} value={asOf} onChange={(e) => setParam("as_of", isDay(e.target.value) && e.target.value !== today ? e.target.value : null)} />
           </label>
           {canVerify && (
             <Link className="btn btn-primary btn-md" to="/verify">
               <Icon name="check" />
-              Verify a room
+              {t("Verify a room")}
             </Link>
           )}
           {canAdd && (
             <Link className="btn btn-default btn-md" to="/e/Asset/new">
               <Icon name="plus" />
-              New asset
+              {t("New asset")}
             </Link>
           )}
         </div>

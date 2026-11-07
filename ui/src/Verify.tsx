@@ -7,7 +7,7 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
-import { api, docPath, errorMessage, newKey, todayIso } from "@ferrum/client";
+import { api, docPath, errorMessage, newKey, todayIso, t } from "@ferrum/client";
 import { Button, confirmDialog, EmptyState, ErrorState, Field, Icon, Spinner, toast, useShellTitle } from "@ferrum/kit";
 import { can, LinkInput, useEntityMeta, useLinkTitle } from "@ferrum/records";
 import { create, list } from "./data";
@@ -40,13 +40,13 @@ function Setup({ onStart }: { onStart: (place: string, next: NextCheck) => void 
       }}
     >
       <div>
-        <h2 className="ast-subhead">Where are you?</h2>
-        <p className="muted">Pick the room. You will see what the register says is there; everything you scan or tap is verified in the register at once.</p>
+        <h2 className="ast-subhead">{t("Where are you?")}</h2>
+        <p className="muted">{t("Pick the room. You will see what the register says is there; everything you scan or tap is verified in the register at once.")}</p>
       </div>
-      <Field label="Room or place" htmlFor={`${id}-place`} required>
+      <Field label={t("Room or place")} htmlFor={`${id}-place`} required>
         <LinkInput to="Location" id={`${id}-place`} value={place} required linkFilters={{ is_group: false }} onChange={setPlace} />
       </Field>
-      <Field label="Verify again" htmlFor={`${id}-next`} hint="Sets when each asset is next due. Categories with no schedule have none unless you choose one.">
+      <Field label={t("Verify again")} htmlFor={`${id}-next`} hint={t("Sets when each asset is next due. Categories with no schedule have none unless you choose one.")}>
         <select id={`${id}-next`} className="select" value={next} onChange={(e) => setNext(e.target.value as NextCheck)}>
           {NEXT.map((n) => (
             <option key={n.id} value={n.id}>
@@ -57,7 +57,7 @@ function Setup({ onStart }: { onStart: (place: string, next: NextCheck) => void 
       </Field>
       <div className="row">
         <Button type="submit" variant="primary" disabled={!place}>
-          Start
+          {t("Start")}
         </Button>
       </div>
     </form>
@@ -184,32 +184,32 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
       <header className="ast-head">
         <div>
           <Tabs />
-          <p className="page-sub">Verifying {here}</p>
+          <p className="page-sub">{t("Verifying {here}", { here })}</p>
         </div>
         <div className="ast-tools">
-          <Button onClick={leave}>Change room</Button>
+          <Button onClick={leave}>{t("Change room")}</Button>
         </div>
       </header>
 
-      <section className="ast-scanbar" aria-label="Scan">
+      <section className="ast-scanbar" aria-label={t("Scan")}>
         <div className="ast-count" aria-live="polite">
           <strong>
             {p.done} of {p.total}
           </strong>{" "}
-          <span className="muted">expected here, verified</span>
-          {p.missing > 0 && <span className="badge badge-red">{p.missing} not found</span>}
-          {p.elsewhere.length > 0 && <span className="badge badge-amber">{p.elsewhere.length} from elsewhere</span>}
+          <span className="muted">{t("expected here, verified")}</span>
+          {p.missing > 0 && <span className="badge badge-red">{t("{missing} not found", { missing: p.missing })}</span>}
+          {p.elsewhere.length > 0 && <span className="badge badge-amber">{t("{length} from elsewhere", { length: p.elsewhere.length })}</span>}
           <span className="ast-progress" aria-hidden="true">
             <span style={{ width: `${p.total ? (p.done / p.total) * 100 : 0}%` }} />
           </span>
         </div>
         <form className="ast-scan" onSubmit={submit}>
-          <input ref={box} className="input" autoFocus autoComplete="off" autoCapitalize="off" spellCheck={false} aria-label="Scan or type a tag or serial number" placeholder="Scan or type a tag or serial number" value={code} onChange={(e) => setCode(e.target.value)} />
+          <input ref={box} className="input" autoFocus autoComplete="off" autoCapitalize="off" spellCheck={false} aria-label={t("Scan or type a tag or serial number")} placeholder={t("Scan or type a tag or serial number")} value={code} onChange={(e) => setCode(e.target.value)} />
           <Button type="submit" variant="primary" disabled={!clean(code)}>
-            Add
+            {t("Add")}
           </Button>
           <Button disabled={!undoable} onClick={() => undoable && void undo(undoable)}>
-            Undo last
+            {t("Undo last")}
           </Button>
         </form>
       </section>
@@ -221,10 +221,10 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
       <div className="ast-walk-cols">
         <section className="card" aria-labelledby="ast-seen">
           <div className="card-head">
-            <h2 id="ast-seen">Scanned</h2>
+            <h2 id="ast-seen">{t("Scanned")}</h2>
           </div>
           {scans.length === 0 ? (
-            <p className="card-body muted">Nothing yet. Scan a tag, or tick things off in the list beside this.</p>
+            <p className="card-body muted">{t("Nothing yet. Scan a tag, or tick things off in the list beside this.")}</p>
           ) : (
             <ul className="ast-scans">
               {scans.map((s) => {
@@ -244,12 +244,12 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
                     </div>
                     {s.status === "elsewhere" && (
                       <button type="button" className="btn btn-default btn-sm" onClick={() => void move(s)}>
-                        Move here
+                        {t("Move here")}
                       </button>
                     )}
                     {s.check && (
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => void undo(s)} aria-label={`Undo ${title(s.asset, s.code)}`}>
-                        Undo
+                        {t("Undo")}
                       </button>
                     )}
                   </li>
@@ -261,26 +261,26 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
 
         <section className="card" aria-labelledby="ast-waiting">
           <div className="card-head">
-            <h2 id="ast-waiting">Still to find{expected.data ? ` (${p.waiting.length})` : ""}</h2>
+            <h2 id="ast-waiting">{t("Still to find")}{expected.data ? ` (${p.waiting.length})` : ""}</h2>
             <span className="spacer" />
             {p.waiting.length > 0 && !expected.isFetching && (
               <button type="button" className="link-btn" onClick={() => void loseRest()}>
-                Mark the rest as not found
+                {t("Mark the rest as not found")}
               </button>
             )}
           </div>
           {expected.error ? (
-            <ErrorState error={expected.error} onRetry={() => void expected.refetch()} title="The register for this place could not be loaded" />
+            <ErrorState error={expected.error} onRetry={() => void expected.refetch()} title={t("The register for this place could not be loaded")} />
           ) : !expected.data ? (
             <div className="card-body">
-              <Spinner label="Loading what is expected here" />
+              <Spinner label={t("Loading what is expected here")} />
             </div>
           ) : rows.length === 0 ? (
-            <EmptyState title="No assets are registered here" icon="file">
-              <p className="muted">Anything you scan will be verified and can be moved here.</p>
+            <EmptyState title={t("No assets are registered here")} icon="file">
+              <p className="muted">{t("Anything you scan will be verified and can be moved here.")}</p>
             </EmptyState>
           ) : p.waiting.length === 0 ? (
-            <EmptyState title="Everything expected here is accounted for" icon="check" />
+            <EmptyState title={t("Everything expected here is accounted for")} icon="check" />
           ) : (
             <ul className="ast-waiting">
               {p.waiting.map((a) => (
@@ -290,13 +290,13 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
                     <div className="faint">{[a.serial_number && `serial ${a.serial_number}`, a.custodian].filter(Boolean).join(" · ")}</div>
                   </div>
                   <button type="button" className="btn btn-default btn-sm" onClick={() => void handle(a.number ?? a.id, a)} aria-label={`${title(a, a.id)} is here`}>
-                    It is here
+                    {t("It is here")}
                   </button>
                 </li>
               ))}
             </ul>
           )}
-          {(expected.data?.total ?? 0) > LIMIT && <p className="card-body ast-note">Only the first {LIMIT} are listed. Anything else you scan is found all the same.</p>}
+          {(expected.data?.total ?? 0) > LIMIT && <p className="card-body ast-note">{t("Only the first {LIMIT} are listed. Anything else you scan is found all the same.", { LIMIT })}</p>}
         </section>
       </div>
     </div>
@@ -310,12 +310,12 @@ export function Verify() {
   const place = sp.get("place");
   const next = (NEXT.find((n) => n.id === sp.get("next"))?.id ?? "category") as NextCheck;
   if (meta.error) return <ErrorState error={meta.error} onRetry={() => void meta.refetch()} />;
-  if (!meta.data) return <Spinner label="Loading" />;
+  if (!meta.data) return <Spinner label={t("Loading")} />;
   if (!can(meta.data.permissions, "create")) {
     return (
-      <EmptyState title="Verifying is for asset managers" icon="alert">
-        <p className="muted">You can see the assets you hold, and when each was last verified, on their pages.</p>
-        <Link to="/">Back to the overview</Link>
+      <EmptyState title={t("Verifying is for asset managers")} icon="alert">
+        <p className="muted">{t("You can see the assets you hold, and when each was last verified, on their pages.")}</p>
+        <Link to="/">{t("Back to the overview")}</Link>
       </EmptyState>
     );
   }
@@ -325,7 +325,7 @@ export function Verify() {
         <header className="ast-head">
           <div>
             <Tabs />
-            <p className="page-sub">Walk a room and confirm what is there</p>
+            <p className="page-sub">{t("Walk a room and confirm what is there")}</p>
           </div>
         </header>
         <Setup onStart={(chosen, when) => setSp({ place: chosen, next: when }, { replace: false })} />
