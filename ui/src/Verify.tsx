@@ -125,7 +125,7 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
         asset = hit.ambiguous ? "many" : (hit.asset ?? (await fetchOne(entered)));
       }
       if (asset === "many") return settle(key, { status: "refused", reason: "More than one asset has that serial number. Scan its tag instead." });
-      if (!asset) return settle(key, { status: "unknown", reason: `Nothing is registered under “${entered}”.` });
+      if (!asset) return settle(key, { status: "unknown", reason: t("Nothing is registered under “{entered}”.", { entered }) });
       found.current.set(asset.id, asset);
       if (alreadySeen(latest.current.filter((s) => s.key !== key), asset)) return settle(key, { asset, status: "again" });
       await record(key, asset, result);

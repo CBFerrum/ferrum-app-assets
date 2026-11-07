@@ -59,9 +59,9 @@ function useValueEvents(asset: Asset) {
 function changeText(p: Point, money: (v: unknown) => string): string {
   const amount = money(p.change.replace("-", ""));
   if (p.kind === "disposal") return "Taken off the books";
-  if (p.kind === "adjustment") return plot(p.change) < 0 ? `Written down by ${amount}` : `Written up by ${amount}`;
-  if (p.kind === "repair") return `Added ${amount}`;
-  return `Depreciation ${amount}`;
+  if (p.kind === "adjustment") return plot(p.change) < 0 ? tr("Written down by {amount}", { amount }) : tr("Written up by {amount}", { amount });
+  if (p.kind === "repair") return tr("Added {amount}", { amount });
+  return tr("Depreciation {amount}", { amount });
 }
 
 const titleOf = (p: Point) => (p.kind === "adjustment" || p.kind === "repair" ? p.label : WORDS[p.kind]);
