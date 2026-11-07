@@ -7,7 +7,7 @@ import { phrase, urgency } from "./dates";
 import { dayText } from "./format";
 import { type Task, useOpenWork, usePlan } from "./plan";
 import type { Asset } from "./types";
-import { t as tr } from "@ferrum/client";
+import { t as tr, isolate } from "@ferrum/client";
 
 /** When a task falls due next, as a chip: red once late, amber within a month. */
 function Due({ date, today }: { date?: string | null; today: string }) {
@@ -15,7 +15,7 @@ function Due({ date, today }: { date?: string | null; today: string }) {
   const how = urgency(date, today);
   return (
     <span className={`badge ${how === "late" ? "badge-red" : how === "soon" ? "badge-amber" : ""}`} title={dayText(date)}>
-      {phrase(date, today, "due", dayText)}
+      {isolate(phrase(date, today, "due", dayText))}
     </span>
   );
 }
@@ -39,7 +39,7 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
             {faults.map((f) => (
               <li key={f.id}>
                 <span>
-                  <Link to={`/e/AssetRepair/${f.id}`}>{f.description || "Fault"}</Link> <span className="faint">since {dayText(f.failure_date)}</span>
+                  <Link to={`/e/AssetRepair/${f.id}`}>{f.description || tr("Fault")}</Link> <span className="faint">{tr("since {value}", { value: dayText(f.failure_date) })}</span>
                 </span>
                 <span className="badge badge-red">{tr("Out of order")}</span>
               </li>
@@ -90,11 +90,11 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
                 {tasks.map((t) => (
                   <tr key={t.id}>
                     <td>
-                      <strong>{t.task_name}</strong>
-                      {(t.maintenance_type || t.assign_to) && <div className="faint">{[t.maintenance_type, t.assign_to].filter(Boolean).join(" · ")}</div>}
+                      <strong>{isolate(t.task_name)}</strong>
+                      {(t.maintenance_type || t.assign_to) && <div className="faint">{isolate([t.maintenance_type, t.assign_to].filter(Boolean).join(" · "))}</div>}
                     </td>
-                    <td>{t.periodicity?.toLowerCase()}</td>
-                    <td className="nowrap">{t.last_completion_date ? dayText(t.last_completion_date) : <span className="faint">never</span>}</td>
+                    <td>{isolate(t.periodicity?.toLowerCase() ?? "")}</td>
+                    <td className="nowrap">{t.last_completion_date ? dayText(t.last_completion_date) : <span className="faint">{tr("never")}</span>}</td>
                     <td>
                       <Due date={t.next_due_date} today={today} />
                     </td>
@@ -119,7 +119,7 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
             {logs.map((l) => (
               <li key={l.id}>
                 <span>
-                  <Link to={`/e/AssetMaintenanceLog/${l.id}`}>{l.task_name ?? named.get(l.task ?? "") ?? "Maintenance"}</Link> <span className="faint">{l.maintenance_status.toLowerCase()}</span>
+                  <Link to={`/e/AssetMaintenanceLog/${l.id}`}>{l.task_name ?? named.get(l.task ?? "") ?? tr("Maintenance")}</Link> <span className="faint">{isolate(l.maintenance_status.toLowerCase())}</span>
                 </span>
                 <span className="row">
                   <Due date={l.due_date} today={today} />

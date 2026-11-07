@@ -1,1 +1,0 @@
-import{j as s,at as e,T as a}from"./index-MkqtRCGz.js";function t(){return s.jsxs("nav",{className:"ast-tabs","aria-label":a("Assets"),children:[s.jsx(e,{to:"/",end:!0,children:a("Overview")}),s.jsx(e,{to:"/verify",children:a("Verify")})]})}export{t as T};

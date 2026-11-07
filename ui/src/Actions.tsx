@@ -5,7 +5,7 @@
 
 import { type FormEvent, useId, useState } from "react";
 import { Link } from "react-router";
-import { api, docPath, errorMessage, newKey, shell, todayIso, t as tr } from "@ferrum/client";
+import { api, docPath, errorMessage, newKey, shell, todayIso, t as tr, isolate } from "@ferrum/client";
 import { Alert, Button, Dialog, Field, Spinner, toast } from "@ferrum/kit";
 import { LinkInput, usePeople } from "@ferrum/records";
 import { action, create, draft, list } from "./data";
@@ -31,7 +31,7 @@ function Buttons({ busy, onClose, go, danger, disabled }: { busy: boolean; onClo
     <div className="row ast-dialog-buttons">
       <Button onClick={onClose}>{tr("Cancel")}</Button>
       <Button type="submit" variant={danger ? "danger" : "primary"} loading={busy} disabled={disabled}>
-        {go}
+        {isolate(go)}
       </Button>
     </div>
   );
@@ -71,7 +71,7 @@ export function MoveDialog({ asset, mode, onClose, onDone }: Props & { mode: "tr
   const [on, setOn] = useState(today);
   const [note, setNote] = useState("");
   const id = useId();
-  const title = mode === "transfer" ? `Move ${label(asset)}` : mode === "handout" ? `Hand out ${label(asset)}` : `Take back ${label(asset)}`;
+  const title = mode === "transfer" ? tr("Move {asset}", { asset: label(asset) }) : mode === "handout" ? tr("Hand out {asset}", { asset: label(asset) }) : tr("Take back {asset}", { asset: label(asset) });
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const row: Record<string, unknown> = { asset: asset.id };
@@ -82,7 +82,7 @@ export function MoveDialog({ asset, mode, onClose, onDone }: Props & { mode: "tr
     }
     const body = { company: asset.company, purpose: PURPOSE[mode], transaction_date: on, remarks: note.trim() || undefined, assets: [row] };
     if (await act.run(() => create("AssetMovement", body, newKey()))) {
-      toast(mode === "transfer" ? "Moved" : mode === "handout" ? `Handed to ${who.trim()}` : "Taken back");
+      toast(mode === "transfer" ? tr("Moved") : mode === "handout" ? tr("Handed to {who}", { who: who.trim() }) : tr("Taken back"));
       onDone();
     }
   };
@@ -90,7 +90,7 @@ export function MoveDialog({ asset, mode, onClose, onDone }: Props & { mode: "tr
   return (
     <Dialog open onClose={onClose} title={title}>
       <form className="stack" onSubmit={submit}>
-        {general && <Alert tone="error">{general}</Alert>}
+        {general && <Alert tone="error">{isolate(general)}</Alert>}
         {mode === "takeback" && <p className="muted">{tr("It is with {custodian}. Taking it back clears who has it.", { custodian: asset.custodian ?? "" })}</p>}
         {mode === "handout" && (
           <Field label={tr("Who gets it")} htmlFor={`${id}-who`} required error={act.field("to_custodian")}>
@@ -98,11 +98,11 @@ export function MoveDialog({ asset, mode, onClose, onDone }: Props & { mode: "tr
           </Field>
         )}
         <Field
-          label={mode === "takeback" ? "Put it back in" : mode === "handout" ? "Where it goes" : "Where to"}
+          label={mode === "takeback" ? tr("Put it back in") : mode === "handout" ? tr("Where it goes") : tr("Where to")}
           htmlFor={`${id}-place`}
           required={mode !== "handout"}
           error={act.field("target_location")}
-          hint={mode === "handout" ? "Leave empty if it stays where it is." : undefined}
+          hint={mode === "handout" ? tr("Leave empty if it stays where it is.") : undefined}
         >
           <LinkInput to="Location" id={`${id}-place`} value={place} required={mode !== "handout"} linkFilters={{ is_group: false }} onChange={setPlace} invalid={!!act.field("target_location")} />
         </Field>
@@ -140,23 +140,23 @@ export function RevalueDialog({ asset, onClose, onDone }: Props) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const body = { asset: asset.id, adjustment_date: on, new_asset_value: value.trim(), difference_account: account, remarks: why.trim() || undefined };
-    const made = await act.run(() => create<{ current_asset_value?: string; new_asset_value?: string }>("AssetValueAdjustment", body, newKey()).then((r) => toast(`Revalued from ${money(r.current_asset_value)} to ${money(r.new_asset_value)}`)));
+    const made = await act.run(() => create<{ current_asset_value?: string; new_asset_value?: string }>("AssetValueAdjustment", body, newKey()).then((r) => toast(tr("Revalued from {value} to {value2}", { value: money(r.current_asset_value), value2: money(r.new_asset_value) }))));
     if (made) onDone();
   };
   const general = act.general(["new_asset_value", "adjustment_date", "difference_account", "asset"]);
   return (
-    <Dialog open onClose={onClose} title={`Revalue ${label(asset)}`}>
+    <Dialog open onClose={onClose} title={tr("Revalue {asset}", { asset: label(asset) })}>
       <form className="stack" onSubmit={submit}>
-        {general && <Alert tone="error">{general}</Alert>}
+        {general && <Alert tone="error">{isolate(general)}</Alert>}
         <p className="muted">
-          {tr("Worth")} <strong>{money(now)}</strong> {tr("in the books now. Depreciation due by the date is booked first, and what is left is spread over the rest of its life.")}
+          {tr("Worth")} <strong>{isolate(money(now))}</strong> {tr("in the books now. Depreciation due by the date is booked first, and what is left is spread over the rest of its life.")}
         </p>
         <Field
           label={tr("What it is worth")}
           htmlFor={`${id}-value`}
           required
           error={act.field("new_asset_value") ?? (value.trim() && typed === null ? "Write a number, such as 1200.50" : undefined)}
-          hint={change === null || change === "0" ? undefined : `A change of ${change.startsWith("-") ? "" : "+"}${money(change)} on today's book value.`}
+          hint={change === null || change === "0" ? undefined : tr("A change of {value}{change} on today's book value.", { value: change.startsWith("-") ? "" : "+", change: money(change) })}
         >
           <input id={`${id}-value`} className="input num" inputMode="decimal" required autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} aria-invalid={!!act.field("new_asset_value") || undefined} />
         </Field>
@@ -168,7 +168,7 @@ export function RevalueDialog({ asset, onClose, onDone }: Props) {
           htmlFor={`${id}-account`}
           required
           error={act.field("difference_account")}
-          hint={change?.startsWith("-") ? "An impairment loss account." : change && change !== "0" ? "A revaluation surplus account." : "An impairment loss for less, a revaluation surplus for more."}
+          hint={change?.startsWith("-") ? tr("An impairment loss account.") : change && change !== "0" ? tr("A revaluation surplus account.") : tr("An impairment loss for less, a revaluation surplus for more.")}
         >
           <LinkInput to="Account" id={`${id}-account`} value={account} required linkFilters={{ is_group: false, ...(asset.company ? { company: asset.company } : {}) }} onChange={setAccount} invalid={!!act.field("difference_account")} />
         </Field>
@@ -198,7 +198,7 @@ export function DisposeDialog({ asset, mode, onClose, onDone }: Props & { mode: 
     const ok = await act.run(async () => {
       if (mode === "scrap") {
         const r = await create<{ net_book_value?: string }>("AssetDisposal", { asset: asset.id, disposal_type: "Scrap", disposal_date: on, remarks: note.trim() || undefined }, newKey());
-        toast(`Scrapped: ${money(r.net_book_value)} written off`);
+        toast(tr("Scrapped: {value} written off", { value: money(r.net_book_value) }));
         return;
       }
       // A sale is finished by its sales invoice: the disposal is kept as a draft and the invoice made from it.
@@ -212,9 +212,9 @@ export function DisposeDialog({ asset, mode, onClose, onDone }: Props & { mode: 
   };
   const general = act.general(["disposal_date", "customer", "sale_amount", "asset"]);
   return (
-    <Dialog open onClose={onClose} title={mode === "sell" ? `Sell ${label(asset)}` : `Scrap ${label(asset)}`}>
+    <Dialog open onClose={onClose} title={mode === "sell" ? tr("Sell {asset}", { asset: label(asset) }) : tr("Scrap {asset}", { asset: label(asset) })}>
       <form className="stack" onSubmit={submit}>
-        {general && <Alert tone="error">{general}</Alert>}
+        {general && <Alert tone="error">{isolate(general)}</Alert>}
         {saved && (
           <Alert tone="info">
             {tr("The sale is saved as a draft.")} <Link to={`/e/AssetDisposal/${saved}`}>{tr("Open it")}</Link>
@@ -222,8 +222,8 @@ export function DisposeDialog({ asset, mode, onClose, onDone }: Props & { mode: 
         )}
         <p className="muted">
           {mode === "sell"
-            ? "Depreciation up to the date is booked, then a sales invoice is made for you to check and submit. Submitting it completes the sale and books the gain or loss."
-            : `Depreciation up to the date is booked, then ${money(asset.value_after_depreciation)} is written off. It can be undone by cancelling the disposal.`}
+            ? tr("Depreciation up to the date is booked, then a sales invoice is made for you to check and submit. Submitting it completes the sale and books the gain or loss.")
+            : tr("Depreciation up to the date is booked, then {value} is written off. It can be undone by cancelling the disposal.", { value: money(asset.value_after_depreciation) })}
         </p>
         {mode === "sell" && (
           <>
@@ -235,7 +235,7 @@ export function DisposeDialog({ asset, mode, onClose, onDone }: Props & { mode: 
             </Field>
           </>
         )}
-        <Field label={mode === "sell" ? "Date of sale" : "Date"} htmlFor={`${id}-on`} required error={act.field("disposal_date")}>
+        <Field label={mode === "sell" ? tr("Date of sale") : tr("Date")} htmlFor={`${id}-on`} required error={act.field("disposal_date")}>
           <DayInput id={`${id}-on`} value={on} onChange={setOn} min={asset.available_for_use_date ?? undefined} />
         </Field>
         <Field label={tr("Note")} htmlFor={`${id}-note`}>
@@ -263,9 +263,9 @@ export function FaultDialog({ asset, onClose, onDone }: Props) {
   };
   const general = act.general(["failure_date", "description", "asset"]);
   return (
-    <Dialog open onClose={onClose} title={`Report a fault on ${label(asset)}`}>
+    <Dialog open onClose={onClose} title={tr("Report a fault on {asset}", { asset: label(asset) })}>
       <form className="stack" onSubmit={submit}>
-        {general && <Alert tone="error">{general}</Alert>}
+        {general && <Alert tone="error">{isolate(general)}</Alert>}
         <Field label={tr("What is wrong")} htmlFor={`${id}-what`} required error={act.field("description")}>
           <textarea id={`${id}-what`} className="textarea" rows={3} required value={what} onChange={(e) => setWhat(e.target.value)} />
         </Field>
@@ -311,11 +311,11 @@ export function ServiceDialog({ asset, task: first, onClose, onDone }: Props & {
   };
   const general = act.general(["completion_date", "task", "actions_performed"]);
   return (
-    <Dialog open onClose={onClose} title={`Log maintenance on ${label(asset)}`}>
+    <Dialog open onClose={onClose} title={tr("Log maintenance on {asset}", { asset: label(asset) })}>
       {plan.isLoading ? (
         <Spinner label={tr("Loading the maintenance plan")} />
       ) : plan.error ? (
-        <Alert tone="error">{errorMessage(plan.error)}</Alert>
+        <Alert tone="error">{isolate(errorMessage(plan.error))}</Alert>
       ) : !plan.data ? (
         <div className="stack">
           <p className="muted">{tr("This asset has no maintenance plan yet. A plan lists its tasks and how often each falls due; the overview then shows what is coming up.")}</p>
@@ -328,14 +328,14 @@ export function ServiceDialog({ asset, task: first, onClose, onDone }: Props & {
         </div>
       ) : (
         <form className="stack" onSubmit={submit}>
-          {general && <Alert tone="error">{general}</Alert>}
+          {general && <Alert tone="error">{isolate(general)}</Alert>}
           <Field label={tr("Task")} htmlFor={`${id}-task`} required error={act.field("task")}>
             <select id={`${id}-task`} className="select" value={chosen} onChange={(e) => setTask(e.target.value)}>
               {plan.data.tasks.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.task_name}
+                  {isolate(t.task_name)}
                   {t.periodicity ? `, ${t.periodicity.toLowerCase()}` : ""}
-                  {t.next_due_date ? `, due ${dayText(t.next_due_date)}` : ""}
+                  {t.next_due_date ? tr(", due {value}", { value: dayText(t.next_due_date) }) : ""}
                 </option>
               ))}
             </select>
@@ -366,15 +366,15 @@ export function VerifyDialog({ asset, onClose, onDone }: Props) {
     e.preventDefault();
     const body = { asset: asset.id, verified_on: on, result: found ? "Found" : "Not Found", seen_at: found ? place : undefined, note: note.trim() || undefined };
     if (await act.run(() => create("AssetVerification", body, newKey()))) {
-      toast(found ? "Verified" : "Marked as not found");
+      toast(found ? tr("Verified") : tr("Marked as not found"));
       onDone();
     }
   };
   const general = act.general(["verified_on", "seen_at", "result", "asset"]);
   return (
-    <Dialog open onClose={onClose} title={`Verify ${label(asset)}`}>
+    <Dialog open onClose={onClose} title={tr("Verify {asset}", { asset: label(asset) })}>
       <form className="stack" onSubmit={submit}>
-        {general && <Alert tone="error">{general}</Alert>}
+        {general && <Alert tone="error">{isolate(general)}</Alert>}
         <div className="segmented" role="group" aria-label={tr("What you found")}>
           <button type="button" aria-pressed={found} onClick={() => setFound(true)}>
             {tr("It is here")}
@@ -384,7 +384,7 @@ export function VerifyDialog({ asset, onClose, onDone }: Props) {
           </button>
         </div>
         {found && (
-          <Field label={tr("Seen at")} htmlFor={`${id}-place`} error={act.field("seen_at")} hint={place && place !== asset.location ? "Not where the register has it. Verify, then move it from its page." : undefined}>
+          <Field label={tr("Seen at")} htmlFor={`${id}-place`} error={act.field("seen_at")} hint={place && place !== asset.location ? tr("Not where the register has it. Verify, then move it from its page.") : undefined}>
             <LinkInput to="Location" id={`${id}-place`} value={place} title={place === asset.location ? asset._titles?.location : undefined} linkFilters={{ is_group: false }} onChange={setPlace} />
           </Field>
         )}
@@ -422,9 +422,9 @@ export function DetailsDialog({ asset, onClose, onDone }: Props) {
   };
   const general = act.general(Object.keys(v));
   return (
-    <Dialog open onClose={onClose} title={`Details of ${label(asset)}`}>
+    <Dialog open onClose={onClose} title={tr("Details of {asset}", { asset: label(asset) })}>
       <form className="stack" onSubmit={submit}>
-        {general && <Alert tone="error">{general}</Alert>}
+        {general && <Alert tone="error">{isolate(general)}</Alert>}
         <Field label={tr("Serial number")} htmlFor={`${id}-serial`} error={act.field("serial_number")}>
           <input id={`${id}-serial`} className="input" autoComplete="off" maxLength={120} value={v.serial_number} onChange={(e) => set("serial_number")(e.target.value)} />
         </Field>

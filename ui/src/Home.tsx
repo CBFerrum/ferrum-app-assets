@@ -7,7 +7,7 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
-import { errorMessage, todayIso, t } from "@ferrum/client";
+import { errorMessage, todayIso, t, isolate } from "@ferrum/client";
 import { EmptyState, ErrorState, Icon, useLiveEntity, useShellTitle } from "@ferrum/kit";
 import { can, useEntityMeta, useMe } from "@ferrum/records";
 import { addMonths, monthEnd, monthStart, relative } from "./dates";
@@ -26,7 +26,7 @@ const isDay = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : nu
 function SectionError({ error, retry }: { error: unknown; retry: () => void }) {
   return (
     <p className="ast-note" role="alert">
-      {errorMessage(error)}{" "}
+      {isolate(errorMessage(error))}{isolate(" ")}
       <button type="button" className="link-btn" onClick={retry}>
         {t("Try again")}
       </button>
@@ -65,7 +65,7 @@ function useCompany(ready: boolean) {
 function Tile({ label, value, sub, to, children }: { label: string; value: ReactNode; sub?: ReactNode; to?: string; children?: ReactNode }) {
   const body = (
     <>
-      <span className="ast-tile-label">{label}</span>
+      <span className="ast-tile-label">{isolate(label)}</span>
       <strong className="ast-tile-value">{value}</strong>
       {children}
       {sub && <span className="ast-tile-sub">{sub}</span>}
@@ -125,14 +125,14 @@ function Owned({ by, setBy, rows, loading, error, retry, money, query }: {
         ) : (
           <ul className="ast-bars">
             {shown.map((b: Bar) => {
-              const name = b.id ? <Link to={listPath({ ...query, [by]: b.id })}>{b.name}</Link> : <span>{b.name}</span>;
+              const name = b.id ? <Link to={listPath({ ...query, [by]: b.id })}>{isolate(b.name)}</Link> : <span>{isolate(b.name)}</span>;
               return (
                 <li key={b.name}>
                   <div className="ast-bar-line">
                     {name}
-                    <span className="faint">{b.assets === 1 ? "1 asset" : `${b.assets} assets`}</span>
+                    <span className="faint">{b.assets === 1 ? t("1 asset") : t("{assets} assets", { assets: b.assets })}</span>
                     <span className="spacer" />
-                    <strong className="num">{money(b.value)}</strong>
+                    <strong className="num">{isolate(money(b.value))}</strong>
                     <span className="faint ast-percent">{b.percent}%</span>
                   </div>
                   <div className="ast-bar" aria-hidden="true">
@@ -159,7 +159,7 @@ function Months({ items, today, money, company }: { items: Month[]; today: strin
           const [booked, waiting] = [plot(m.booked), plot(m.waiting)];
           const label = monthLabel(m.start, today);
           const to = `/r/asset_depreciation_schedule?${new URLSearchParams({ ...(company ? { company } : {}), from_date: m.start, to_date: monthEnd(m.start), run: "1" })}`;
-          const said = `${label}: ${money(m.booked)} booked, ${money(m.waiting)} still to book${m.failed ? ", some could not be booked" : m.late ? ", some is overdue" : ""}`;
+          const said = t("{label}: {value} booked, {value2} still to book{value3}", { label, value: money(m.booked), value2: money(m.waiting), value3: m.failed ? ", some could not be booked" : m.late ? ", some is overdue" : "" });
           return (
             <li key={m.start}>
               <Link className="ast-month" to={to} title={said} aria-label={said} data-now={m.start === monthStart(today) || undefined}>
@@ -171,15 +171,15 @@ function Months({ items, today, money, company }: { items: Month[]; today: strin
                   {booked > 0 && <span className="ast-month-booked" style={{ height: `${(booked / top) * 100}%` }} />}
                   {waiting > 0 && <span className="ast-month-waiting" data-state={m.failed ? "failed" : m.late ? "late" : undefined} style={{ height: `${(waiting / top) * 100}%` }} />}
                 </span>
-                <span className="ast-month-name">{label}</span>
+                <span className="ast-month-name">{isolate(label)}</span>
               </Link>
             </li>
           );
         })}
       </ol>
       <p className="ast-legend faint">
-        <span className="ast-key ast-key-booked" aria-hidden="true" /> booked <span className="ast-key ast-key-waiting" aria-hidden="true" /> {t("still to book")}
-        <span className="ast-key ast-key-late" aria-hidden="true" /> overdue <span className="ast-key ast-key-failed" aria-hidden="true" /> {t("could not be booked")}
+        <span className="ast-key ast-key-booked" aria-hidden="true" /> {t("booked")} <span className="ast-key ast-key-waiting" aria-hidden="true" /> {t("still to book")}
+        <span className="ast-key ast-key-late" aria-hidden="true" /> {t("overdue")} <span className="ast-key ast-key-failed" aria-hidden="true" /> {t("could not be booked")}
       </p>
     </>
   );
@@ -197,7 +197,7 @@ interface Group {
   to: string;
 }
 
-const TONE_WORD: Record<Tone, string> = { bad: "Needs action", warn: "Coming up", quiet: "For information" };
+const TONE_WORD: Record<Tone, string> = { get bad() { return t("Needs action"); }, get warn() { return t("Coming up"); }, get quiet() { return t("For information"); } };
 
 function Attention({ groups, loading, error, retry }: { groups: Group[]; loading: boolean; error: unknown; retry: () => void }) {
   const shown = groups.filter((g) => g.total > 0);
@@ -224,7 +224,7 @@ function Attention({ groups, loading, error, retry }: { groups: Group[]; loading
                   <span className="ast-group-mark" aria-hidden="true">
                     <Icon name={g.tone === "bad" ? "alert" : g.tone === "warn" ? "calendar" : "check"} size={14} />
                   </span>
-                  <Link to={g.to}>{g.title}</Link>
+                  <Link to={g.to}>{isolate(g.title)}</Link>
                   <span className={`badge ${g.tone === "bad" ? "badge-red" : g.tone === "warn" ? "badge-amber" : ""}`} title={TONE_WORD[g.tone]}>
                     {g.total}
                   </span>
@@ -232,14 +232,14 @@ function Attention({ groups, loading, error, retry }: { groups: Group[]; loading
                 <ul className="ast-lines">
                   {g.lines.map((l) => (
                     <li key={l.id}>
-                      <Link to={l.to ?? `/a/${l.id}`}>{l.title}</Link>
-                      {l.detail && <span className="faint"> {l.detail}</span>}
+                      <Link to={l.to ?? `/a/${l.id}`}>{isolate(l.title)}</Link>
+                      {l.detail && <span className="faint"> {isolate(l.detail)}</span>}
                     </li>
                   ))}
                   {g.total > g.lines.length && (
                     <li>
                       <Link className="faint" to={g.to}>
-                        and {g.total - g.lines.length} more
+                        {t("and")} {g.total - g.lines.length} {t("more")}
                       </Link>
                     </li>
                   )}
@@ -256,7 +256,7 @@ function Attention({ groups, loading, error, retry }: { groups: Group[]; loading
 // ── the page ──
 
 export function Home() {
-  useShellTitle("Assets");
+  useShellTitle(t("Assets"));
   const qc = useQueryClient();
   const who = useMe();
   const assetMeta = useEntityMeta("Asset").data;
@@ -335,7 +335,7 @@ export function Home() {
       const failing = behind.items.some((s) => s.reason);
       found.set("posting", {
         id: "posting",
-        title: failing ? "Depreciation could not be booked" : "Depreciation due, not booked yet",
+        title: failing ? t("Depreciation could not be booked") : t("Depreciation due, not booked yet"),
         tone: "bad",
         total: behind.total,
         lines: behind.items.map((s) => ({ id: s.id, title: s.title, detail: s.reason ? `since ${dayText(s.since)}: ${s.reason}` : `since ${dayText(s.since)}` })),
@@ -346,7 +346,7 @@ export function Home() {
     if (due.data) {
       found.set("maintenance", {
         id: "maintenance",
-        title: "Maintenance overdue",
+        title: t("Maintenance overdue"),
         tone: "bad",
         total: overdue.length,
         lines: overdue.slice(0, 3).map((r) => ({ id: r.asset_id, to: `/a/${r.asset_id}?tab=maintenance`, title: [r.asset, r.asset_name].filter(Boolean).join(" · "), detail: `${r.task_name ?? "Maintenance"}, ${r.days_overdue} ${r.days_overdue === 1 ? "day" : "days"} late` })),
@@ -376,7 +376,7 @@ export function Home() {
   const body = byCategory.error ? (
     <ErrorState error={byCategory.error} onRetry={() => void byCategory.refetch()} title={t("The register could not be loaded")} />
   ) : byCategory.data && count === 0 && !byCategory.isFetching && asOf === today ? (
-    <EmptyState title={everything ? "No assets yet" : "No assets in your care"} icon="file">
+    <EmptyState title={everything ? t("No assets yet") : t("No assets in your care")} icon="file">
       {everything ? (
         <>
           <p className="muted">{t("Assets are made when a purchase invoice buys a fixed asset item. Ones you already own are added by hand.")}</p>
@@ -454,11 +454,11 @@ export function Home() {
               <ul className="ast-lines ast-due">
                 {due.data.rows.slice(0, 6).map((r) => (
                   <li key={`${r.asset_maintenance}-${r.task_name}-${r.next_due_date}`}>
-                    <span className={`badge ${r.days_overdue > 0 ? "badge-red" : "badge-amber"}`}>{r.days_overdue > 0 ? `${r.days_overdue} ${r.days_overdue === 1 ? "day" : "days"} late` : relative(r.next_due_date, today, dayText)}</span>
+                    <span className={`badge ${r.days_overdue > 0 ? "badge-red" : "badge-amber"}`}>{r.days_overdue > 0 ? t("{days_overdue} {value} late", { days_overdue: r.days_overdue, value: r.days_overdue === 1 ? "day" : "days" }) : relative(r.next_due_date, today, dayText)}</span>
                     <span>
-                      <strong>{r.task_name ?? "Maintenance"}</strong>{" "}
+                      <strong>{r.task_name ?? t("Maintenance")}</strong>{isolate(" ")}
                       <Link className="faint" to={`/a/${r.asset_id}?tab=maintenance`}>
-                        {[r.asset, r.asset_name].filter(Boolean).join(" · ")}
+                        {isolate([r.asset, r.asset_name].filter(Boolean).join(" · "))}
                       </Link>
                     </span>
                   </li>
