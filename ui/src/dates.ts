@@ -1,3 +1,4 @@
+import { t } from "@ferrum/client";
 // Calendar days as `YYYY-MM-DD` text, the way the server sends them. Worked out in UTC so a daylight
 // saving change never moves a day. Pure, so it is tested without a browser.
 
@@ -50,7 +51,7 @@ export function relative(iso: string, today: string, format: (iso: string) => st
   if (n === 1) return "tomorrow";
   if (n === -1) return "yesterday";
   if (Math.abs(n) > near) return format(iso);
-  return n > 0 ? `in ${n} days` : `${-n} days ago`;
+  return n > 0 ? t("in {n} days", { n }) : t("{value} days ago", { value: -n });
 }
 
 /** How pressing a day is: past, within `soon` days, or further off (or no day at all). */
@@ -65,6 +66,6 @@ export function urgency(iso: string | null | undefined, today: string, soon = 30
 export function phrase(iso: string, today: string, noun: "back" | "due" | "ends", format: (iso: string) => string, near = 45): string {
   const n = daysBetween(today, iso);
   if (n >= 0) return `${noun} ${relative(iso, today, format, near)}`;
-  if (noun === "ends") return `ended ${relative(iso, today, format, near)}`;
-  return -n > near ? `overdue since ${format(iso)}` : `${-n} ${-n === 1 ? "day" : "days"} overdue`;
+  if (noun === "ends") return t("ended {iso}", { iso: relative(iso, today, format, near) });
+  return -n > near ? t("overdue since {iso}", { iso: format(iso) }) : (-n === 1 ? t("1 day overdue") : t("{days} days overdue", { days: -n }));
 }

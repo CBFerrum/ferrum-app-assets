@@ -338,7 +338,7 @@ export function Home() {
         title: failing ? t("Depreciation could not be booked") : t("Depreciation due, not booked yet"),
         tone: "bad",
         total: behind.total,
-        lines: behind.items.map((s) => ({ id: s.id, title: s.title, detail: s.reason ? `since ${dayText(s.since)}: ${s.reason}` : `since ${dayText(s.since)}` })),
+        lines: behind.items.map((s) => ({ id: s.id, title: s.title, detail: s.reason ? t("since {value}: {reason}", { value: dayText(s.since), reason: s.reason }) : t("since {value}", { value: dayText(s.since) }) })),
         to: `/r/asset_depreciation_schedule?${new URLSearchParams({ ...params, from_date: behind.items[0]?.since ?? from, to_date: today, run: "1" })}`,
       });
     }
@@ -349,7 +349,7 @@ export function Home() {
         title: t("Maintenance overdue"),
         tone: "bad",
         total: overdue.length,
-        lines: overdue.slice(0, 3).map((r) => ({ id: r.asset_id, to: `/a/${r.asset_id}?tab=maintenance`, title: [r.asset, r.asset_name].filter(Boolean).join(" · "), detail: `${r.task_name ?? "Maintenance"}, ${r.days_overdue} ${r.days_overdue === 1 ? "day" : "days"} late` })),
+        lines: overdue.slice(0, 3).map((r) => ({ id: r.asset_id, to: `/a/${r.asset_id}?tab=maintenance`, title: [r.asset, r.asset_name].filter(Boolean).join(" · "), detail: (r.days_overdue === 1 ? t("{task}, 1 day late", { task: r.task_name ?? t("Maintenance") }) : t("{task}, {days} days late", { task: r.task_name ?? t("Maintenance"), days: r.days_overdue })) })),
         to: `/r/asset_maintenance_due?${new URLSearchParams({ ...params, as_of: today, days: "0", run: "1" })}`,
       });
     }
@@ -394,9 +394,9 @@ export function Home() {
   ) : (
     <>
       <section className="ast-tiles" aria-label={t("Totals")}>
-        <Tile label={t("Net book value")} value={byCategory.data ? money(totals?.net_book_value) : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${asOf === today ? "" : `, as of ${dayText(asOf)}`}` : undefined} to={registerLink} />
+        <Tile label={t("Net book value")} value={byCategory.data ? money(totals?.net_book_value) : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${asOf === today ? "" : t(", as of {asOf}", { asOf: dayText(asOf) })}` : undefined} to={registerLink} />
         <Tile label={t("Cost")} value={byCategory.data ? money(totals?.cost) : <span className="skeleton ast-tile-skel" />} sub="what was paid, with repairs and revaluations" to={registerLink} />
-        <Tile label={t("Depreciated")} value={byCategory.data ? `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${money(totals?.accumulated_depreciation)} of the cost` : undefined} to={registerLink}>
+        <Tile label={t("Depreciated")} value={byCategory.data ? `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? t("{value} of the cost", { value: money(totals?.accumulated_depreciation) }) : undefined} to={registerLink}>
           <span className="ast-meter" aria-hidden="true">
             <span style={{ width: `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` }} />
           </span>
@@ -404,7 +404,7 @@ export function Home() {
         <Tile
           label={t("Depreciation this month")}
           value={thisMonth ? money(thisMonth.total) : plan.error ? "—" : <span className="skeleton ast-tile-skel" />}
-          sub={thisMonth ? `${money(thisMonth.booked)} booked so far` : undefined}
+          sub={thisMonth ? t("{value} booked so far", { value: money(thisMonth.booked) }) : undefined}
           to={`/r/asset_depreciation_schedule?${new URLSearchParams({ ...params, from_date: from, to_date: monthEnd(from), run: "1" })}`}
         />
       </section>
@@ -477,7 +477,7 @@ export function Home() {
         <div>
           <Tabs />
           <p className="page-sub" aria-live="polite">
-            {byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${byCategory.data.meta?.company ? ` of ${byCategory.data.meta.company}` : ""}` : " "}
+            {byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${byCategory.data.meta?.company ? t(" of {company}", { company: byCategory.data.meta.company }) : ""}` : " "}
           </p>
         </div>
         <div className="ast-tools">

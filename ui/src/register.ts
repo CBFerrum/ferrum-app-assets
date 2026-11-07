@@ -147,13 +147,13 @@ export function line(spec: Spec, a: Asset, today: string, format: (day: string) 
   const when = day ? relative(day, today, format) : "";
   const detail =
     spec.id === "overdue"
-      ? [a.custodian, `due back ${when}`]
+      ? [a.custodian, t("due back {when}", { when })]
       : spec.id === "missing"
-        ? [`last checked ${when || "never"}`]
+        ? [t("last checked {value}", { value: when || "never" })]
         : spec.id === "verify"
-          ? [`due ${when}`]
+          ? [t("due {when}", { when })]
           : spec.id === "warranty"
-            ? [`ends ${when}`]
+            ? [t("ends {when}", { when })]
             : spec.id === "broken"
               ? [a._titles?.location]
               : [a._titles?.location, a.custodian];

@@ -24,7 +24,7 @@ interface Props {
   onDone: () => void;
 }
 
-const label = (asset: Asset) => asset.asset_name ?? asset.number ?? "this asset";
+const label = (asset: Asset) => asset.asset_name ?? asset.number ?? tr("this asset");
 
 function Buttons({ busy, onClose, go, danger, disabled }: { busy: boolean; onClose: () => void; go: string; danger?: boolean; disabled?: boolean }) {
   return (
