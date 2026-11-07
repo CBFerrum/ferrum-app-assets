@@ -214,7 +214,7 @@ a.ast-tile:hover {
 
 .ast-percent {
   min-width: 2.25rem;
-  text-align: right;
+  text-align: end;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -334,12 +334,12 @@ a.ast-tile:hover {
   display: inline-block;
   width: 0.75rem;
   height: 0.75rem;
-  margin-left: 0.5rem;
+  margin-inline-start: 0.5rem;
   border-radius: 2px;
 }
 
 .ast-legend .ast-key:first-child {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 .ast-key-booked {
@@ -396,7 +396,8 @@ a.ast-tile:hover {
 .ast-lines {
   display: grid;
   gap: 0.125rem;
-  margin: 0.25rem 0 0 1.5rem;
+  margin-block: 0.25rem 0;
+  margin-inline: 1.5rem 0;
   padding: 0;
   font-size: 13px;
   list-style: none;
@@ -405,7 +406,7 @@ a.ast-tile:hover {
 
 .ast-due {
   gap: 0.5rem;
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 .ast-due li {
@@ -678,7 +679,7 @@ a.ast-tile:hover {
   position: absolute;
   top: 0.75rem;
   bottom: 0.75rem;
-  left: 0.8125rem;
+  inset-inline-start: 0.8125rem;
   width: 1px;
   background: var(--border);
   content: "";
