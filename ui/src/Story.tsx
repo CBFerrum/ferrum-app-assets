@@ -5,7 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { api, ApiError, docPath, todayIso } from "@ferrum/client";
+import { api, ApiError, docPath, todayIso, t } from "@ferrum/client";
 import { EmptyState, ErrorState, Icon, Spinner } from "@ferrum/kit";
 import { list, report } from "./data";
 import { dayText } from "./format";
@@ -56,9 +56,9 @@ export function Story({ asset, money }: { asset: Asset; money: (v: unknown) => s
     },
   });
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
-  if (!q.data) return <Spinner label="Loading its history" />;
+  if (!q.data) return <Spinner label={t("Loading its history")} />;
   const entries = history({ asset, ...q.data }, { money, date: dayText });
-  if (!entries.length) return <EmptyState title="Nothing has happened yet" icon="timeline" />;
+  if (!entries.length) return <EmptyState title={t("Nothing has happened yet")} icon="timeline" />;
   return (
     <ol className="ast-story">
       {entries.map((e: Entry) => (

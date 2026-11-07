@@ -12,6 +12,7 @@ import { compact, dayText } from "./format";
 import { plot } from "./money";
 import type { Asset } from "./types";
 import { type Point, type PointKind, type ValueEvent, valueSeries } from "./value";
+import { t as tr } from "@ferrum/client";
 
 const H = 232;
 /** The tooltip's width in pixels, so it can be kept inside the drawing. */
@@ -116,7 +117,7 @@ function Chart({ points, today, money }: { points: Point[]; today: string; money
   const many = points.length > 60;
 
   return (
-    <div ref={box} className="ast-chart" tabIndex={0} role="group" aria-label="Book value over time. Use the left and right arrow keys to read each period." onKeyDown={onKeyDown}>
+    <div ref={box} className="ast-chart" tabIndex={0} role="group" aria-label={tr("Book value over time. Use the left and right arrow keys to read each period.")} onKeyDown={onKeyDown}>
       <svg viewBox={`0 0 ${W} ${H}`} role="presentation" onPointerMove={nearest} onPointerDown={nearest}>
         {ticks.map((f) => {
           const yy = M.top + (1 - f) * (H - M.top - M.bottom);
@@ -139,7 +140,7 @@ function Chart({ points, today, money }: { points: Point[]; today: string; money
           <g>
             <line className="ast-now" x1={geometry.now} x2={geometry.now} y1={M.top} y2={H - M.bottom} />
             <text className="ast-axis" x={geometry.now} y={H - 8} textAnchor="middle">
-              Today
+              {tr("Today")}
             </text>
           </g>
         )}
@@ -161,10 +162,10 @@ function Chart({ points, today, money }: { points: Point[]; today: string; money
             {titleOf(p)}, {dayText(p.date)}
           </strong>
           {p.kind !== "start" && <div>{changeText(p, money)}</div>}
-          <div>Worth {money(p.value)} after</div>
+          <div>{tr("Worth")} {money(p.value)} after</div>
           {p.entry && (
             <a href={`/open/JournalEntry/${p.entry}`} target="_blank" rel="noreferrer">
-              Journal entry
+              {tr("Journal entry")}
             </a>
           )}
           {p.error && <div className="ast-tip-error">{p.error}</div>}
@@ -184,8 +185,8 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
 
   if (asset.calculate_depreciation === false) {
     return (
-      <EmptyState title="This asset does not depreciate" icon="chart">
-        <p className="muted">It stays on the books at {money(asset.value_after_depreciation)}.</p>
+      <EmptyState title={tr("This asset does not depreciate")} icon="chart">
+        <p className="muted">{tr("It stays on the books at")} {money(asset.value_after_depreciation)}.</p>
       </EmptyState>
     );
   }
@@ -210,23 +211,23 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
         {next ? `Next: ${money(next.change.replace("-", ""))} ${daysBetween(today, next.date) < 0 ? "was due" : "on"} ${dayText(next.date)}.` : "Nothing more is planned."}
       </p>
       {points.length < 2 ? (
-        <p className="muted">No depreciation is planned for this asset.</p>
+        <p className="muted">{tr("No depreciation is planned for this asset.")}</p>
       ) : (
         <Chart points={points} today={today} money={money} />
       )}
-      {!series.exact && events.isSuccess && <p className="ast-note">Revaluations and repairs are not all shown to you, so the early part of the line is only as exact as what you can see. The present and the plan are the books'.</p>}
+      {!series.exact && events.isSuccess && <p className="ast-note">{tr("Revaluations and repairs are not all shown to you, so the early part of the line is only as exact as what you can see. The present and the plan are the books'.")}</p>}
       <div className="table-wrap">
         <table className="table ast-schedule">
-          <caption className="sr-only">Every period of the depreciation schedule</caption>
+          <caption className="sr-only">{tr("Every period of the depreciation schedule")}</caption>
           <thead>
             <tr>
-              <th scope="col">Date</th>
-              <th scope="col">What</th>
+              <th scope="col">{tr("Date")}</th>
+              <th scope="col">{tr("What")}</th>
               <th scope="col" className="num">
-                Change
+                {tr("Change")}
               </th>
               <th scope="col" className="num">
-                Worth after
+                {tr("Worth after")}
               </th>
             </tr>
           </thead>

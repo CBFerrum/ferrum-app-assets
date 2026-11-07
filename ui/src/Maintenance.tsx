@@ -7,10 +7,11 @@ import { phrase, urgency } from "./dates";
 import { dayText } from "./format";
 import { type Task, useOpenWork, usePlan } from "./plan";
 import type { Asset } from "./types";
+import { t as tr } from "@ferrum/client";
 
 /** When a task falls due next, as a chip: red once late, amber within a month. */
 function Due({ date, today }: { date?: string | null; today: string }) {
-  if (!date) return <span className="faint">no date</span>;
+  if (!date) return <span className="faint">{tr("no date")}</span>;
   const how = urgency(date, today);
   return (
     <span className={`badge ${how === "late" ? "badge-red" : how === "soon" ? "badge-amber" : ""}`} title={dayText(date)}>
@@ -23,7 +24,7 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
   const plan = usePlan(asset.id);
   const work = useOpenWork(asset.id);
   if (plan.error) return <ErrorState error={plan.error} onRetry={() => void plan.refetch()} />;
-  if (plan.isLoading || work.isLoading) return <Spinner label="Loading its maintenance" />;
+  if (plan.isLoading || work.isLoading) return <Spinner label={tr("Loading its maintenance")} />;
   const tasks: Task[] = plan.data?.tasks ?? [];
   const named = new Map(tasks.map((t) => [t.id, t.task_name]));
   const logs = work.data?.logs ?? [];
@@ -32,42 +33,42 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
   return (
     <div className="stack ast-service">
       {faults.length > 0 && (
-        <section aria-label="Faults">
-          <h3 className="ast-subhead">Faults to repair</h3>
+        <section aria-label={tr("Faults")}>
+          <h3 className="ast-subhead">{tr("Faults to repair")}</h3>
           <ul className="ast-rows">
             {faults.map((f) => (
               <li key={f.id}>
                 <span>
                   <Link to={`/e/AssetRepair/${f.id}`}>{f.description || "Fault"}</Link> <span className="faint">since {dayText(f.failure_date)}</span>
                 </span>
-                <span className="badge badge-red">Out of order</span>
+                <span className="badge badge-red">{tr("Out of order")}</span>
               </li>
             ))}
           </ul>
-          <p className="faint">Open a fault to say when it was repaired and what it cost.</p>
+          <p className="faint">{tr("Open a fault to say when it was repaired and what it cost.")}</p>
         </section>
       )}
-      <section aria-label="Plan">
+      <section aria-label={tr("Plan")}>
         <div className="ast-subhead-row">
-          <h3 className="ast-subhead">Plan</h3>
+          <h3 className="ast-subhead">{tr("Plan")}</h3>
           <span className="spacer" />
           {plan.data && can.log && (
             <Button size="sm" icon="check" onClick={() => onLog()}>
-              Log work done
+              {tr("Log work done")}
             </Button>
           )}
           {can.fault && (
             <Button size="sm" icon="alert" onClick={onFault}>
-              Report a fault
+              {tr("Report a fault")}
             </Button>
           )}
         </div>
         {!plan.data ? (
-          <EmptyState title="No maintenance plan" icon="calendar">
-            <p className="muted">A plan lists what this asset needs and how often. The overview then shows what falls due.</p>
+          <EmptyState title={tr("No maintenance plan")} icon="calendar">
+            <p className="muted">{tr("A plan lists what this asset needs and how often. The overview then shows what falls due.")}</p>
             {can.plan && (
               <Link className="btn btn-primary btn-md" to={`/e/AssetMaintenance/new?asset=${asset.id}`}>
-                Plan maintenance
+                {tr("Plan maintenance")}
               </Link>
             )}
           </EmptyState>
@@ -76,12 +77,12 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
             <table className="table">
               <thead>
                 <tr>
-                  <th scope="col">Task</th>
-                  <th scope="col">Every</th>
-                  <th scope="col">Last done</th>
-                  <th scope="col">Next due</th>
+                  <th scope="col">{tr("Task")}</th>
+                  <th scope="col">{tr("Every")}</th>
+                  <th scope="col">{tr("Last done")}</th>
+                  <th scope="col">{tr("Next due")}</th>
                   <th scope="col">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{tr("Actions")}</span>
                   </th>
                 </tr>
               </thead>
@@ -100,7 +101,7 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
                     <td className="num">
                       {can.log && (
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => onLog(t.id)}>
-                          Log done
+                          {tr("Log done")}
                         </button>
                       )}
                     </td>
@@ -112,8 +113,8 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
         )}
       </section>
       {logs.length > 0 && (
-        <section aria-label="Work open">
-          <h3 className="ast-subhead">Work planned or under way</h3>
+        <section aria-label={tr("Work open")}>
+          <h3 className="ast-subhead">{tr("Work planned or under way")}</h3>
           <ul className="ast-rows">
             {logs.map((l) => (
               <li key={l.id}>
@@ -124,7 +125,7 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
                   <Due date={l.due_date} today={today} />
                   {can.log && l.task && (
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => onLog(l.task ?? undefined)}>
-                      Mark done
+                      {tr("Mark done")}
                     </button>
                   )}
                 </span>
