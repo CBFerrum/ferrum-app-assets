@@ -8,6 +8,7 @@
 
 import { decimal, minus, units } from "./money";
 import type { Asset, ScheduleRow } from "./types";
+import { t } from "@ferrum/client";
 
 export type PointKind = "start" | "booked" | "due" | "planned" | "failed" | "adjustment" | "repair" | "disposal";
 
@@ -75,7 +76,7 @@ export function valueSeries(asset: Input, events: ValueEvent[], today: string): 
         date: day(r.schedule_date),
         change: -(units(r.depreciation_amount) ?? 0n),
         kind: "booked",
-        label: r.disposal ? "Depreciation up to the disposal" : "Depreciation booked",
+        label: r.disposal ? t("Depreciation up to the disposal") : t("Depreciation booked"),
         order: 0,
         entry: r.journal_entry,
       })),
@@ -92,7 +93,7 @@ export function valueSeries(asset: Input, events: ValueEvent[], today: string): 
   const startDate = [day(asset.available_for_use_date) || day(asset.purchase_date), past[0]?.date].filter(Boolean).sort()[0] ?? today;
   const cost = (units(asset.gross_purchase_amount) ?? 0n) - (units(asset.opening_accumulated_depreciation) ?? 0n);
 
-  const points: Point[] = [{ key: "start", date: startDate, value: decimal(value), change: "0", kind: "start", booked: true, label: "Put in use" }];
+  const points: Point[] = [{ key: "start", date: startDate, value: decimal(value), change: "0", kind: "start", booked: true, label: t("Put in use") }];
   past.forEach((s, i) => points.push({ key: s.key, date: s.date, value: decimal(after[i]), change: decimal(s.change), kind: s.kind, booked: true, label: s.label, entry: s.entry }));
 
   // Forward from now through the plan.
@@ -116,7 +117,7 @@ export function valueSeries(asset: Input, events: ValueEvent[], today: string): 
       change: minus("0", last.value),
       kind: "disposal",
       booked: true,
-      label: asset.status === "Sold" ? "Sold" : "Written off",
+      label: asset.status === "Sold" ? t("Sold") : t("Written off"),
     });
   }
   return { points, exact: value === cost };

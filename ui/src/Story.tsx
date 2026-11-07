@@ -5,7 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { api, ApiError, docPath, todayIso, t } from "@ferrum/client";
+import { api, ApiError, docPath, todayIso, t, isolate } from "@ferrum/client";
 import { EmptyState, ErrorState, Icon, Spinner } from "@ferrum/kit";
 import { list, report } from "./data";
 import { dayText } from "./format";
@@ -68,12 +68,12 @@ export function Story({ asset, money }: { asset: Asset; money: (v: unknown) => s
           </span>
           <div className="ast-story-body">
             <div className="ast-story-line">
-              {e.to ? <Link to={`/${e.to}`}>{e.title}</Link> : e.open ? <a href={`/open/${e.open.entity}/${e.open.id}`}>{e.title}</a> : <strong>{e.title}</strong>}
+              {e.to ? <Link to={`/${e.to}`}>{isolate(e.title)}</Link> : e.open ? <a href={`/open/${e.open.entity}/${e.open.id}`}>{isolate(e.title)}</a> : <strong>{isolate(e.title)}</strong>}
               <time className="faint" dateTime={e.at}>
-                {dayText(e.at)}
+                {isolate(dayText(e.at))}
               </time>
             </div>
-            {e.detail && <p className="faint">{e.detail}</p>}
+            {e.detail && <p className="faint">{isolate(e.detail)}</p>}
           </div>
         </li>
       ))}

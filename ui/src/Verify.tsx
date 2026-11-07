@@ -7,7 +7,7 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
-import { api, docPath, errorMessage, newKey, todayIso, t } from "@ferrum/client";
+import { api, docPath, errorMessage, newKey, todayIso, t, isolate } from "@ferrum/client";
 import { Button, confirmDialog, EmptyState, ErrorState, Field, Icon, Spinner, toast, useShellTitle } from "@ferrum/kit";
 import { can, LinkInput, useEntityMeta, useLinkTitle } from "@ferrum/records";
 import { create, list } from "./data";
@@ -19,10 +19,10 @@ const FIELDS = "number,asset_name,serial_number,location,custodian,company";
 const LIMIT = 500;
 
 const NEXT: { id: NextCheck; label: string }[] = [
-  { id: "category", label: "When its category says" },
-  { id: "3", label: "In 3 months" },
-  { id: "6", label: "In 6 months" },
-  { id: "12", label: "In a year" },
+  { id: "category", get label() { return t("When its category says"); } },
+  { id: "3", get label() { return t("In 3 months"); } },
+  { id: "6", get label() { return t("In 6 months"); } },
+  { id: "12", get label() { return t("In a year"); } },
 ];
 
 const title = (a: Candidate | null, code: string) => (a ? [a.number, a.asset_name].filter(Boolean).join(" · ") : code);
@@ -50,7 +50,7 @@ function Setup({ onStart }: { onStart: (place: string, next: NextCheck) => void 
         <select id={`${id}-next`} className="select" value={next} onChange={(e) => setNext(e.target.value as NextCheck)}>
           {NEXT.map((n) => (
             <option key={n.id} value={n.id}>
-              {n.label}
+              {isolate(n.label)}
             </option>
           ))}
         </select>
@@ -169,9 +169,9 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
   const loseRest = async () => {
     const rest = p.waiting;
     const ok = await confirmDialog({
-      title: `Mark ${rest.length} ${rest.length === 1 ? "asset" : "assets"} as not found?`,
-      message: "They are listed as not found on the overview until someone finds them again.",
-      confirmLabel: "Mark as not found",
+      title: t("Mark {length} {value} as not found?", { length: rest.length, value: rest.length === 1 ? "asset" : "assets" }),
+      message: t("They are listed as not found on the overview until someone finds them again."),
+      confirmLabel: t("Mark as not found"),
       danger: true,
     });
     if (!ok) return;
@@ -194,8 +194,8 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
       <section className="ast-scanbar" aria-label={t("Scan")}>
         <div className="ast-count" aria-live="polite">
           <strong>
-            {p.done} of {p.total}
-          </strong>{" "}
+            {t("{done} of {total}", { done: p.done, total: p.total })}
+          </strong>{isolate(" ")}
           <span className="muted">{t("expected here, verified")}</span>
           {p.missing > 0 && <span className="badge badge-red">{t("{missing} not found", { missing: p.missing })}</span>}
           {p.elsewhere.length > 0 && <span className="badge badge-amber">{t("{length} from elsewhere", { length: p.elsewhere.length })}</span>}
@@ -235,11 +235,11 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
                       {s.status === "saving" ? <Spinner small /> : <Icon name={mark.icon} size={14} />}
                     </span>
                     <div className="ast-scan-body">
-                      {s.asset ? <Link to={`/a/${s.asset.id}`}>{title(s.asset, s.code)}</Link> : <strong>{s.code}</strong>}
+                      {s.asset ? <Link to={`/a/${s.asset.id}`}>{isolate(title(s.asset, s.code))}</Link> : <strong>{isolate(s.code)}</strong>}
                       <div className="faint">
                         {s.reason ?? mark.word}
-                        {s.moved && ", moved here"}
-                        {s.status === "elsewhere" && s.asset?._titles?.location && `: recorded at ${s.asset._titles.location}`}
+                        {s.moved && t(", moved here")}
+                        {s.status === "elsewhere" && s.asset?._titles?.location && t(": recorded at {location}", { location: s.asset._titles.location })}
                       </div>
                     </div>
                     {s.status === "elsewhere" && (
@@ -248,7 +248,7 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
                       </button>
                     )}
                     {s.check && (
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => void undo(s)} aria-label={`Undo ${title(s.asset, s.code)}`}>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => void undo(s)} aria-label={t("Undo {value}", { value: title(s.asset, s.code) })}>
                         {t("Undo")}
                       </button>
                     )}
@@ -286,10 +286,10 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
               {p.waiting.map((a) => (
                 <li key={a.id}>
                   <div className="ast-scan-body">
-                    <Link to={`/a/${a.id}`}>{title(a, a.id)}</Link>
-                    <div className="faint">{[a.serial_number && `serial ${a.serial_number}`, a.custodian].filter(Boolean).join(" · ")}</div>
+                    <Link to={`/a/${a.id}`}>{isolate(title(a, a.id))}</Link>
+                    <div className="faint">{isolate([a.serial_number && `serial ${a.serial_number}`, a.custodian].filter(Boolean).join(" · "))}</div>
                   </div>
-                  <button type="button" className="btn btn-default btn-sm" onClick={() => void handle(a.number ?? a.id, a)} aria-label={`${title(a, a.id)} is here`}>
+                  <button type="button" className="btn btn-default btn-sm" onClick={() => void handle(a.number ?? a.id, a)} aria-label={t("{a} is here", { a: title(a, a.id) })}>
                     {t("It is here")}
                   </button>
                 </li>
@@ -304,7 +304,7 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
 }
 
 export function Verify() {
-  useShellTitle("Verify");
+  useShellTitle(t("Verify"));
   const [sp, setSp] = useSearchParams();
   const meta = useEntityMeta("AssetVerification");
   const place = sp.get("place");

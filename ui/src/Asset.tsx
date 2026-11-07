@@ -6,7 +6,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
-import { api, docPath, errorMessage, fetchBlob, todayIso, uploadFile, t as tr } from "@ferrum/client";
+import { api, docPath, errorMessage, fetchBlob, todayIso, uploadFile, t as tr, isolate } from "@ferrum/client";
 import { Alert, Button, ErrorState, Icon, PageLoading, TabPanel, Tabs, toast, useLiveEntity, useShellTitle } from "@ferrum/kit";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@ferrum/kit/primitives";
 import { can, CollabPanel, type EntityMeta, useEntityMeta, useRecord } from "@ferrum/records";
@@ -20,10 +20,10 @@ import { depreciated } from "./register";
 import type { Asset } from "./types";
 
 const TABS = [
-  { id: "depreciation", label: "Depreciation" },
-  { id: "history", label: "History" },
-  { id: "maintenance", label: "Maintenance" },
-  { id: "files", label: "Files and discussion" },
+  { id: "depreciation", get label() { return tr("Depreciation"); } },
+  { id: "history", get label() { return tr("History"); } },
+  { id: "maintenance", get label() { return tr("Maintenance"); } },
+  { id: "files", get label() { return tr("Files and discussion"); } },
 ];
 
 /** A status as a badge: what is fine is calm, what needs a hand is not. */
@@ -80,18 +80,18 @@ function Photo({ asset, canEdit }: { asset: Asset; canEdit: boolean }) {
   return (
     <figure className="ast-photo">
       {src ? (
-        <img src={src} alt={`Photo of ${asset.asset_name ?? "the asset"}`} />
+        <img src={src} alt={tr("Photo of {value}", { value: asset.asset_name ?? "the asset" })} />
       ) : (
         <div className="ast-photo-empty">
           <Icon name="file" size={26} />
-          <span>{picture.isLoading || blob.isLoading ? "Loading the photo" : "No photo yet"}</span>
+          <span>{picture.isLoading || blob.isLoading ? tr("Loading the photo") : tr("No photo yet")}</span>
         </div>
       )}
       {canEdit && (
         <>
           <input ref={input} type="file" accept="image/*" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => void add(e)} />
           <Button size="sm" icon="upload" loading={busy} onClick={() => input.current?.click()}>
-            {src ? "Change the photo" : "Add a photo"}
+            {src ? tr("Change the photo") : tr("Add a photo")}
           </Button>
         </>
       )}
@@ -102,7 +102,7 @@ function Photo({ asset, canEdit }: { asset: Asset; canEdit: boolean }) {
 function Fact({ name, children }: { name: string; children: ReactNode }) {
   return (
     <div>
-      <dt>{name}</dt>
+      <dt>{isolate(name)}</dt>
       <dd>{children}</dd>
     </div>
   );
@@ -113,7 +113,7 @@ function When({ date, today, noun }: { date: string; today: string; noun: "back"
   const how = urgency(date, today);
   return (
     <span className={`badge ${how === "late" ? (noun === "ends" ? "" : "badge-red") : how === "soon" ? "badge-amber" : ""}`} title={dayText(date)}>
-      {phrase(date, today, noun, dayText)}
+      {isolate(phrase(date, today, noun, dayText))}
     </span>
   );
 }
@@ -126,14 +126,14 @@ function Facts({ asset, today, rights, canEdit, onDetails, onVerify }: { asset: 
     <aside className="ast-side" aria-label={tr("Facts")}>
       <Photo asset={asset} canEdit={canEdit} />
       <dl className="ast-facts">
-        <Fact name="Where">{asset.location ? <Link to={`/e/Asset?f.location=${asset.location}`}>{t.location}</Link> : "—"}</Fact>
+        <Fact name="Where">{asset.location ? <Link to={`/e/Asset?f.location=${asset.location}`}>{isolate(t.location)}</Link> : "—"}</Fact>
         <Fact name="Held by">
           {asset.custodian ? (
             <>
-              {asset.custodian}
+              {isolate(asset.custodian)}
               {asset.expected_return_date && (
                 <>
-                  {" "}
+                  {isolate(" ")}
                   <When date={asset.expected_return_date} today={today} noun="back" />
                 </>
               )}
@@ -142,39 +142,39 @@ function Facts({ asset, today, rights, canEdit, onDetails, onVerify }: { asset: 
             <span className="faint">{tr("Nobody")}</span>
           )}
         </Fact>
-        <Fact name="Category">{asset.asset_category ? <Link to={`/e/AssetCategory/${asset.asset_category}`}>{t.asset_category}</Link> : "—"}</Fact>
+        <Fact name="Category">{asset.asset_category ? <Link to={`/e/AssetCategory/${asset.asset_category}`}>{isolate(t.asset_category)}</Link> : "—"}</Fact>
         <Fact name="Bought">
           {asset.purchase_date ? dayText(asset.purchase_date) : "—"}
           {asset.purchase_invoice && (
             <>
-              {" "}
+              {isolate(" ")}
               <a className="faint" href={`/open/PurchaseInvoice/${asset.purchase_invoice}`}>
-                {t.purchase_invoice ?? "invoice"}
+                {t.purchase_invoice ?? tr("invoice")}
               </a>
             </>
           )}
         </Fact>
-        {asset.available_for_use_date && asset.available_for_use_date !== asset.purchase_date && <Fact name="In use from">{dayText(asset.available_for_use_date)}</Fact>}
+        {asset.available_for_use_date && asset.available_for_use_date !== asset.purchase_date && <Fact name="In use from">{isolate(dayText(asset.available_for_use_date))}</Fact>}
       </dl>
       <div className="ast-section-head">
         <h2>{tr("Identity")}</h2>
         {canEdit && (
           <button type="button" className="link-btn" onClick={onDetails}>
-            {identity ? "Edit" : "Add"}
+            {identity ? tr("Edit") : tr("Add")}
           </button>
         )}
       </div>
       {identity ? (
         <dl className="ast-facts">
-          {asset.serial_number && <Fact name="Serial number">{asset.serial_number}</Fact>}
-          {asset.manufacturer && <Fact name="Made by">{asset.manufacturer}</Fact>}
-          {asset.model_number && <Fact name="Model">{asset.model_number}</Fact>}
+          {asset.serial_number && <Fact name="Serial number">{isolate(asset.serial_number)}</Fact>}
+          {asset.manufacturer && <Fact name="Made by">{isolate(asset.manufacturer)}</Fact>}
+          {asset.model_number && <Fact name="Model">{isolate(asset.model_number)}</Fact>}
           {asset.warranty_expiry_date && (
             <Fact name="Warranty">
-              {dayText(asset.warranty_expiry_date)} <When date={asset.warranty_expiry_date} today={today} noun="ends" />
+              {isolate(dayText(asset.warranty_expiry_date))} <When date={asset.warranty_expiry_date} today={today} noun="ends" />
             </Fact>
           )}
-          {asset.end_of_life_date && <Fact name="End of life">{dayText(asset.end_of_life_date)}</Fact>}
+          {asset.end_of_life_date && <Fact name="End of life">{isolate(dayText(asset.end_of_life_date))}</Fact>}
         </dl>
       ) : (
         <p className="faint">{tr("No serial number, model or warranty recorded.")}</p>
@@ -193,7 +193,7 @@ function Facts({ asset, today, rights, canEdit, onDetails, onVerify }: { asset: 
             <Fact name="Last verified">
               {asset.last_verified_date ? (
                 <>
-                  {dayText(asset.last_verified_date)} {asset.verification_result === "Not Found" && <span className="badge badge-red">{tr("Not found")}</span>}
+                  {isolate(dayText(asset.last_verified_date))} {asset.verification_result === "Not Found" && <span className="badge badge-red">{tr("Not found")}</span>}
                 </>
               ) : (
                 <span className="faint">{tr("Never")}</span>
@@ -201,7 +201,7 @@ function Facts({ asset, today, rights, canEdit, onDetails, onVerify }: { asset: 
             </Fact>
             {asset.next_verification_date && (
               <Fact name="Next due">
-                {dayText(asset.next_verification_date)} <When date={asset.next_verification_date} today={today} noun="due" />
+                {isolate(dayText(asset.next_verification_date))} <When date={asset.next_verification_date} today={today} noun="due" />
               </Fact>
             )}
           </dl>
@@ -219,17 +219,17 @@ function Numbers({ asset, money }: { asset: Asset; money: (v: unknown) => string
     <dl className="ast-numbers">
       <div>
         <dt>{tr("Worth now")}</dt>
-        <dd className="ast-worth">{money(asset.value_after_depreciation)}</dd>
+        <dd className="ast-worth">{isolate(money(asset.value_after_depreciation))}</dd>
       </div>
       <div>
         <dt>{tr("Cost")}</dt>
-        <dd>{money(asset.total_asset_cost)}</dd>
-        {asset.additional_asset_cost && Number(asset.additional_asset_cost) !== 0 && <dd className="faint">with {money(asset.additional_asset_cost)} {tr("of repairs")}</dd>}
+        <dd>{isolate(money(asset.total_asset_cost))}</dd>
+        {asset.additional_asset_cost && Number(asset.additional_asset_cost) !== 0 && <dd className="faint">{tr("with {value}", { value: money(asset.additional_asset_cost) })} {tr("of repairs")}</dd>}
       </div>
       <div>
         <dt>{tr("Depreciated")}</dt>
         <dd>
-          {pct}% <span className="faint">({money(asset.accumulated_depreciation)})</span>
+          {pct}% <span className="faint">({isolate(money(asset.accumulated_depreciation))})</span>
         </dd>
         <dd className="ast-meter" aria-hidden="true">
           <span style={{ width: `${pct}%` }} />
@@ -238,7 +238,7 @@ function Numbers({ asset, money }: { asset: Asset; money: (v: unknown) => string
       <div>
         <dt>{tr("Next depreciation")}</dt>
         <dd>{next ? money(next.depreciation_amount) : "—"}</dd>
-        {next && <dd className="faint">{dayText(next.schedule_date)}</dd>}
+        {next && <dd className="faint">{isolate(dayText(next.schedule_date))}</dd>}
       </div>
     </dl>
   );
@@ -249,7 +249,7 @@ function Menu({ label, primary, children }: { label: string; primary?: boolean; 
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button type="button" className={`btn ${primary ? "btn-primary" : "btn-default"} btn-md`}>
-          {label}
+          {isolate(label)}
           <Icon name="chevronDown" size={14} />
         </button>
       </DropdownMenuTrigger>
@@ -267,7 +267,7 @@ function AssetPage({ meta, id }: { meta: EntityMeta; id: string }) {
   const tab = TABS.find((t) => t.id === sp.get("tab"))?.id ?? "depreciation";
   const [dialog, setDialog] = useState<{ kind: DialogKind; task?: string } | null>(null);
   const today = todayIso();
-  useShellTitle(asset ? (asset.asset_name ?? "Asset") : null);
+  useShellTitle(asset ? (asset.asset_name ?? tr("Asset")) : null);
 
   const refresh = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["peek", "Asset", id] });
@@ -295,11 +295,11 @@ function AssetPage({ meta, id }: { meta: EntityMeta; id: string }) {
       </div>
       <header className="ast-asset-head">
         <div className="ast-asset-title">
-          <h1 className="page-title">{asset.asset_name ?? asset.number ?? "Asset"}</h1>
-          <p className="page-sub">{[asset.number, asset._titles?.asset_category, asset.asset_quantity && asset.asset_quantity > 1 ? `${asset.asset_quantity} units` : null].filter(Boolean).join(" · ")}</p>
+          <h1 className="page-title">{asset.asset_name ?? asset.number ?? tr("Asset")}</h1>
+          <p className="page-sub">{isolate([asset.number, asset._titles?.asset_category, asset.asset_quantity && asset.asset_quantity > 1 ? `${asset.asset_quantity} units` : null].filter(Boolean).join(" · "))}</p>
         </div>
         <div className="page-actions">
-          {status && <span className={`badge ${STATUS_BADGE[status] ?? "badge-blue"}`}>{status}</span>}
+          {status && <span className={`badge ${STATUS_BADGE[status] ?? "badge-blue"}`}>{isolate(status)}</span>}
           {live && rights.move && (
             <Menu label={tr("Move")} primary>
               <DropdownMenuItem onSelect={() => open("transfer")}>{tr("Move to another place…")}</DropdownMenuItem>
@@ -343,12 +343,12 @@ function AssetPage({ meta, id }: { meta: EntityMeta; id: string }) {
       {asset.docstatus === 2 && <Alert tone="error">{tr("This asset was cancelled. Its depreciation was reversed.")}</Alert>}
       {asset.disposal && (
         <Alert tone="info" action={<Link to={`/e/AssetDisposal/${asset.disposal}`}>{tr("Open the disposal")}</Link>}>
-          {status === "Sold" ? "Sold" : "Scrapped"} on {dayText(asset.disposal_date)}.
+          {status === "Sold" ? tr("Sold") : tr("Scrapped")} {tr("on {value}.", { value: dayText(asset.disposal_date) })}
         </Alert>
       )}
       {asset.verification_result === "Not Found" && live && (
         <Alert tone="error" action={rights.verify ? <Button size="sm" onClick={() => open("verify")}>{tr("Verify again")}</Button> : undefined}>
-          {tr("It was not found at the last check, on")} {dayText(asset.last_verified_date)}.
+          {tr("It was not found at the last check, on")} {isolate(dayText(asset.last_verified_date))}.
         </Alert>
       )}
       <div className="ast-body">

@@ -6,6 +6,7 @@
 import { addDays, monthOf, monthStart, relative } from "./dates";
 import { compare, share, sum } from "./money";
 import type { Asset, PlanRow, RegisterRow } from "./types";
+import { t } from "@ferrum/client";
 
 // ── lists the figures open ──
 
@@ -123,12 +124,12 @@ export interface Spec {
 
 export function specs(today: string, warrantyDays = 60): Spec[] {
   return [
-    { id: "missing", title: "Not found at the last check", tone: "bad", query: { verification_result: "Not Found" }, date: "last_verified_date" },
-    { id: "overdue", title: "Past their return date", tone: "bad", query: { expected_return_date: `..${addDays(today, -1)}` }, date: "expected_return_date" },
-    { id: "broken", title: "Out of order", tone: "bad", query: { status: "Out of Order" } },
-    { id: "verify", title: "Due to be verified", tone: "warn", query: { next_verification_date: `..${today}` }, date: "next_verification_date" },
-    { id: "warranty", title: `Warranty ends within ${warrantyDays} days`, tone: "warn", query: { warranty_expiry_date: `${today}..${addDays(today, warrantyDays)}` }, date: "warranty_expiry_date" },
-    { id: "depreciated", title: "Fully depreciated, still in use", tone: "quiet", query: { status: "Fully Depreciated" } },
+    { id: "missing", title: t("Not found at the last check"), tone: "bad", query: { verification_result: "Not Found" }, date: "last_verified_date" },
+    { id: "overdue", title: t("Past their return date"), tone: "bad", query: { expected_return_date: `..${addDays(today, -1)}` }, date: "expected_return_date" },
+    { id: "broken", title: t("Out of order"), tone: "bad", query: { status: "Out of Order" } },
+    { id: "verify", title: t("Due to be verified"), tone: "warn", query: { next_verification_date: `..${today}` }, date: "next_verification_date" },
+    { id: "warranty", title: t("Warranty ends within {warrantyDays} days", { warrantyDays }), tone: "warn", query: { warranty_expiry_date: `${today}..${addDays(today, warrantyDays)}` }, date: "warranty_expiry_date" },
+    { id: "depreciated", title: t("Fully depreciated, still in use"), tone: "quiet", query: { status: "Fully Depreciated" } },
   ];
 }
 
@@ -156,7 +157,7 @@ export function line(spec: Spec, a: Asset, today: string, format: (day: string) 
             : spec.id === "broken"
               ? [a._titles?.location]
               : [a._titles?.location, a.custodian];
-  return { id: a.id, title: [a.number, a.asset_name].filter(Boolean).join(" · ") || "Asset", detail: detail.filter(Boolean).join(" · ") };
+  return { id: a.id, title: [a.number, a.asset_name].filter(Boolean).join(" · ") || t("Asset"), detail: detail.filter(Boolean).join(" · ") };
 }
 
 // ── depreciation that was due and is not booked ──

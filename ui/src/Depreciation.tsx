@@ -12,7 +12,7 @@ import { compact, dayText } from "./format";
 import { plot } from "./money";
 import type { Asset } from "./types";
 import { type Point, type PointKind, type ValueEvent, valueSeries } from "./value";
-import { t as tr } from "@ferrum/client";
+import { t as tr, isolate } from "@ferrum/client";
 
 const H = 232;
 /** The tooltip's width in pixels, so it can be kept inside the drawing. */
@@ -48,8 +48,8 @@ function useValueEvents(asset: Asset) {
           .catch(() => []),
       ]);
       return [
-        ...adjustments.map((a): ValueEvent => ({ date: a.adjustment_date, amount: a.difference_amount, kind: "adjustment", label: "Revalued" })),
-        ...repairs.filter((r) => r.completion_date).map((r): ValueEvent => ({ date: r.completion_date, amount: r.repair_cost, kind: "repair", label: "Repair added to its value" })),
+        ...adjustments.map((a): ValueEvent => ({ date: a.adjustment_date, amount: a.difference_amount, kind: "adjustment", label: tr("Revalued") })),
+        ...repairs.filter((r) => r.completion_date).map((r): ValueEvent => ({ date: r.completion_date, amount: r.repair_cost, kind: "repair", label: tr("Repair added to its value") })),
       ];
     },
   });
@@ -125,16 +125,16 @@ function Chart({ points, today, money }: { points: Point[]; today: string; money
             <g key={f}>
               <line className="ast-grid-line" x1={M.left} x2={W - M.right} y1={yy} y2={yy} />
               <text className="ast-axis" x={M.left - 8} y={yy + 4} textAnchor="end">
-                {compact(geometry.top * f)}
+                {isolate(compact(geometry.top * f))}
               </text>
             </g>
           );
         })}
         <text className="ast-axis" x={M.left} y={H - 8}>
-          {monthYear(geometry.t0)}
+          {isolate(monthYear(geometry.t0))}
         </text>
         <text className="ast-axis" x={W - M.right} y={H - 8} textAnchor="end">
-          {monthYear(geometry.t1)}
+          {isolate(monthYear(geometry.t1))}
         </text>
         {geometry.now !== null && (
           <g>
@@ -159,20 +159,20 @@ function Chart({ points, today, money }: { points: Point[]; today: string; money
           style={{ left: `${Math.min(Math.max(geometry.at[active].x, TIP / 2 + 4), Math.max(W - TIP / 2 - 4, TIP / 2 + 4))}px`, top: `${geometry.at[active].y}px`, width: TIP }}
         >
           <strong>
-            {titleOf(p)}, {dayText(p.date)}
+            {isolate(titleOf(p))}, {isolate(dayText(p.date))}
           </strong>
-          {p.kind !== "start" && <div>{changeText(p, money)}</div>}
-          <div>{tr("Worth")} {money(p.value)} after</div>
+          {p.kind !== "start" && <div>{isolate(changeText(p, money))}</div>}
+          <div>{tr("Worth")} {tr("{value} after", { value: money(p.value) })}</div>
           {p.entry && (
             <a href={`/open/JournalEntry/${p.entry}`} target="_blank" rel="noreferrer">
               {tr("Journal entry")}
             </a>
           )}
-          {p.error && <div className="ast-tip-error">{p.error}</div>}
+          {p.error && <div className="ast-tip-error">{isolate(p.error)}</div>}
         </div>
       )}
       <p className="sr-only" aria-live="polite">
-        {p ? `${titleOf(p)}, ${dayText(p.date)}: ${p.kind === "start" ? "" : `${changeText(p, money)}; `}worth ${money(p.value)} after.` : ""}
+        {p ? tr("{p}, {value}: {value2}worth {value3} after.", { p: titleOf(p), value: dayText(p.date), value2: p.kind === "start" ? "" : `${changeText(p, money)}; `, value3: money(p.value) }) : ""}
       </p>
     </div>
   );
@@ -186,7 +186,7 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
   if (asset.calculate_depreciation === false) {
     return (
       <EmptyState title={tr("This asset does not depreciate")} icon="chart">
-        <p className="muted">{tr("It stays on the books at")} {money(asset.value_after_depreciation)}.</p>
+        <p className="muted">{tr("It stays on the books at")} {isolate(money(asset.value_after_depreciation))}.</p>
       </EmptyState>
     );
   }
@@ -201,14 +201,14 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
       {stuck.length > 0 && (asset.docstatus ?? 0) === 1 && (
         <div className="alert alert-error" role="alert">
           <div className="alert-body">
-            <strong>{stuck.some((p) => p.error) ? "Depreciation could not be booked." : "Depreciation is due and not booked yet."}</strong>{" "}
-            {stuck[0].error ? stuck[0].error : `Due since ${dayText(stuck[0].date)}; the books are updated every minute.`}
+            <strong>{stuck.some((p) => p.error) ? tr("Depreciation could not be booked.") : tr("Depreciation is due and not booked yet.")}</strong>{isolate(" ")}
+            {stuck[0].error ? stuck[0].error : tr("Due since {value}; the books are updated every minute.", { value: dayText(stuck[0].date) })}
           </div>
         </div>
       )}
       <p className="muted ast-summary">
-        {last ? `Booked up to ${dayText(last.date)}. ` : "Nothing booked yet. "}
-        {next ? `Next: ${money(next.change.replace("-", ""))} ${daysBetween(today, next.date) < 0 ? "was due" : "on"} ${dayText(next.date)}.` : "Nothing more is planned."}
+        {last ? tr("Booked up to {value}. ", { value: dayText(last.date) }) : tr("Nothing booked yet. ")}
+        {next ? tr("Next: {value} {value2} {value3}.", { value: money(next.change.replace("-", "")), value2: daysBetween(today, next.date) < 0 ? "was due" : "on", value3: dayText(next.date) }) : tr("Nothing more is planned.")}
       </p>
       {points.length < 2 ? (
         <p className="muted">{tr("No depreciation is planned for this asset.")}</p>
@@ -234,21 +234,21 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
           <tbody>
             {points.map((pt) => (
               <tr key={pt.key} data-kind={pt.kind}>
-                <td className="nowrap">{dayText(pt.date)}</td>
+                <td className="nowrap">{isolate(dayText(pt.date))}</td>
                 <td>
-                  <span className={`badge ${pt.kind === "booked" ? "badge-green" : pt.kind === "failed" ? "badge-red" : pt.kind === "due" ? "badge-amber" : pt.kind === "planned" ? "" : "badge-blue"}`}>{WORDS[pt.kind]}</span>
+                  <span className={`badge ${pt.kind === "booked" ? "badge-green" : pt.kind === "failed" ? "badge-red" : pt.kind === "due" ? "badge-amber" : pt.kind === "planned" ? "" : "badge-blue"}`}>{isolate(WORDS[pt.kind])}</span>
                   {pt.entry && (
                     <>
-                      {" "}
+                      {isolate(" ")}
                       <a className="faint" href={`/open/JournalEntry/${pt.entry}`} target="_blank" rel="noreferrer">
-                        entry
+                        {tr("entry")}
                       </a>
                     </>
                   )}
-                  {pt.error && <div className="ast-reason">{pt.error}</div>}
+                  {pt.error && <div className="ast-reason">{isolate(pt.error)}</div>}
                 </td>
                 <td className="num">{pt.kind === "start" ? "" : money(pt.change)}</td>
-                <td className="num">{money(pt.value)}</td>
+                <td className="num">{isolate(money(pt.value))}</td>
               </tr>
             ))}
           </tbody>
