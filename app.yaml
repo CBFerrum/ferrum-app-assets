@@ -1,6 +1,6 @@
 id: assets
 name: Assets
-version: 0.3.12
+version: 0.3.13
 publisher: cbferrum
 summary: "Fixed assets: categories, depreciation schedules and posting, movements, maintenance, revaluation and disposal"
 description: README.md
@@ -36,3 +36,20 @@ contributes:
   shell.create:
     - {id: asset, label: Asset, path: assets/e/Asset/new, entity: Asset}
     - {id: verify, label: Verify a room, path: assets/verify, entity: AssetVerification}
+  # What the assistant should know in Assets's pages, and what it suggests asking there.
+  shell.assistant:
+    - id: assets
+      title: "Assets"
+      instructions: >-
+        An Asset is on the books once it is submitted; a draft is not yet. Its status says where it is in its life,
+        from Submitted through depreciation to In Maintenance, Out of Order or Sold. Its book value comes from its
+        depreciation schedule for each finance book (AssetDepreciationSchedule), not from adding entries up yourself:
+        say which finance book a figure is for when there is more than one. An AssetMovement changes where an asset is
+        and who holds it; an AssetVerification records what was found where it should be. Repairs, maintenance logs
+        and calibration records keep its upkeep. An open MaintenanceRequest is a reported fault not yet repaired, and
+        an EquipmentLockout that is Locked means the equipment must not be used.
+      suggestions:
+        - "Which assets are out of order or in maintenance?"
+        - "What is the book value of our vehicles?"
+        - "Which maintenance tasks are due this month?"
+        - "What did the last verification not find?"
