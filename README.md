@@ -299,6 +299,7 @@ CHANGELOG.md  what changed in each version
 
 | Version | Highlights |
 |---|---|
+| **0.3.16** | Its reports' names in Arabic and Hindi. |
 | **0.3.15** | Its names in Arabic and Hindi; the last English sentences translated. |
 | **0.3.14** | Sentences built in code are words too, in Arabic and Hindi. |
 | **0.3.13** | The assistant knows its records. |
