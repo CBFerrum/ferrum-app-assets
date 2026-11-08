@@ -80,7 +80,7 @@ function Photo({ asset, canEdit }: { asset: Asset; canEdit: boolean }) {
   return (
     <figure className="ast-photo">
       {src ? (
-        <img src={src} alt={tr("Photo of {value}", { value: asset.asset_name ?? "the asset" })} />
+        <img src={src} alt={tr("Photo of {value}", { value: asset.asset_name ?? tr("the asset") })} />
       ) : (
         <div className="ast-photo-empty">
           <Icon name="file" size={26} />
@@ -296,7 +296,7 @@ function AssetPage({ meta, id }: { meta: EntityMeta; id: string }) {
       <header className="ast-asset-head">
         <div className="ast-asset-title">
           <h1 className="page-title">{asset.asset_name ?? asset.number ?? tr("Asset")}</h1>
-          <p className="page-sub">{isolate([asset.number, asset._titles?.asset_category, asset.asset_quantity && asset.asset_quantity > 1 ? `${asset.asset_quantity} units` : null].filter(Boolean).join(" · "))}</p>
+          <p className="page-sub">{isolate([asset.number, asset._titles?.asset_category, asset.asset_quantity && asset.asset_quantity > 1 ? tr("{asset_quantity} units", { asset_quantity: asset.asset_quantity }) : null].filter(Boolean).join(" · "))}</p>
         </div>
         <div className="page-actions">
           {status && <span className={`badge ${STATUS_BADGE[status] ?? "badge-blue"}`}>{isolate(status)}</span>}
@@ -343,7 +343,7 @@ function AssetPage({ meta, id }: { meta: EntityMeta; id: string }) {
       {asset.docstatus === 2 && <Alert tone="error">{tr("This asset was cancelled. Its depreciation was reversed.")}</Alert>}
       {asset.disposal && (
         <Alert tone="info" action={<Link to={`/e/AssetDisposal/${asset.disposal}`}>{tr("Open the disposal")}</Link>}>
-          {status === "Sold" ? tr("Sold") : tr("Scrapped")} {tr("on {value}.", { value: dayText(asset.disposal_date) })}
+          {(status === "Sold" ? tr("Sold on {value}.", { value: dayText(asset.disposal_date) }) : tr("Scrapped on {value}.", { value: dayText(asset.disposal_date) }))}
         </Alert>
       )}
       {asset.verification_result === "Not Found" && live && (

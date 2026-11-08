@@ -6,7 +6,7 @@
 import { type FormEvent, useId, useState } from "react";
 import { Link } from "react-router";
 import { api, docPath, errorMessage, newKey, shell, todayIso, t as tr, isolate } from "@ferrum/client";
-import { Alert, Button, Dialog, Field, Spinner, toast } from "@ferrum/kit";
+import { Alert, Button, Dialog, Field, Spinner, toast, placed } from "@ferrum/kit";
 import { LinkInput, usePeople } from "@ferrum/records";
 import { action, create, draft, list } from "./data";
 import { dayText, moneyIn } from "./format";
@@ -117,7 +117,7 @@ export function MoveDialog({ asset, mode, onClose, onDone }: Props & { mode: "tr
         <Field label={tr("Note")} htmlFor={`${id}-note`}>
           <textarea id={`${id}-note`} className="textarea" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
-        <Buttons busy={act.busy} onClose={onClose} go={mode === "transfer" ? "Move" : mode === "handout" ? "Hand out" : "Take back"} disabled={mode === "handout" ? !who.trim() : !place} />
+        <Buttons busy={act.busy} onClose={onClose} go={mode === "transfer" ? "Move" : mode === "handout" ? tr("Hand out") : tr("Take back")} disabled={mode === "handout" ? !who.trim() : !place} />
       </form>
     </Dialog>
   );
@@ -149,13 +149,13 @@ export function RevalueDialog({ asset, onClose, onDone }: Props) {
       <form className="stack" onSubmit={submit}>
         {general && <Alert tone="error">{isolate(general)}</Alert>}
         <p className="muted">
-          {tr("Worth")} <strong>{isolate(money(now))}</strong> {tr("in the books now. Depreciation due by the date is booked first, and what is left is spread over the rest of its life.")}
+          {placed(tr("Worth {p1} in the books now. Depreciation due by the date is booked first, and what is left is spread over the rest of its life."), { p1: <strong>{isolate(money(now))}</strong> })}
         </p>
         <Field
           label={tr("What it is worth")}
           htmlFor={`${id}-value`}
           required
-          error={act.field("new_asset_value") ?? (value.trim() && typed === null ? "Write a number, such as 1200.50" : undefined)}
+          error={act.field("new_asset_value") ?? (value.trim() && typed === null ? tr("Write a number, such as 1200.50") : undefined)}
           hint={change === null || change === "0" ? undefined : tr("A change of {value}{change} on today's book value.", { value: change.startsWith("-") ? "" : "+", change: money(change) })}
         >
           <input id={`${id}-value`} className="input num" inputMode="decimal" required autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} aria-invalid={!!act.field("new_asset_value") || undefined} />
@@ -175,7 +175,7 @@ export function RevalueDialog({ asset, onClose, onDone }: Props) {
         <Field label={tr("Why")} htmlFor={`${id}-why`}>
           <textarea id={`${id}-why`} className="textarea" rows={2} value={why} onChange={(e) => setWhy(e.target.value)} />
         </Field>
-        <Buttons busy={act.busy} onClose={onClose} go="Revalue" disabled={typed === null || !account} />
+        <Buttons busy={act.busy} onClose={onClose} go={tr("Revalue")} disabled={typed === null || !account} />
       </form>
     </Dialog>
   );
@@ -230,7 +230,7 @@ export function DisposeDialog({ asset, mode, onClose, onDone }: Props & { mode: 
             <Field label={tr("Customer")} htmlFor={`${id}-customer`} required error={act.field("customer")}>
               <LinkInput to="Customer" id={`${id}-customer`} value={customer} required onChange={setCustomer} invalid={!!act.field("customer")} />
             </Field>
-            <Field label={tr("Price")} htmlFor={`${id}-price`} required error={act.field("sale_amount") ?? (price.trim() && units(price) === null ? "Write a number, such as 1200.50" : undefined)} hint={tr("Before taxes, in the company's currency.")}>
+            <Field label={tr("Price")} htmlFor={`${id}-price`} required error={act.field("sale_amount") ?? (price.trim() && units(price) === null ? tr("Write a number, such as 1200.50") : undefined)} hint={tr("Before taxes, in the company's currency.")}>
               <input id={`${id}-price`} className="input num" inputMode="decimal" required autoComplete="off" value={price} onChange={(e) => setPrice(e.target.value)} aria-invalid={!!act.field("sale_amount") || undefined} />
             </Field>
           </>
@@ -241,7 +241,7 @@ export function DisposeDialog({ asset, mode, onClose, onDone }: Props & { mode: 
         <Field label={tr("Note")} htmlFor={`${id}-note`}>
           <textarea id={`${id}-note`} className="textarea" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
-        <Buttons busy={act.busy} onClose={onClose} go={mode === "sell" ? "Make the sales invoice" : "Scrap it"} danger={mode === "scrap"} disabled={mode === "sell" && (!customer || units(price) === null)} />
+        <Buttons busy={act.busy} onClose={onClose} go={mode === "sell" ? tr("Make the sales invoice") : tr("Scrap it")} danger={mode === "scrap"} disabled={mode === "sell" && (!customer || units(price) === null)} />
       </form>
     </Dialog>
   );
@@ -272,7 +272,7 @@ export function FaultDialog({ asset, onClose, onDone }: Props) {
         <Field label={tr("Since")} htmlFor={`${id}-on`} required error={act.field("failure_date")}>
           <DayInput id={`${id}-on`} value={on} onChange={setOn} />
         </Field>
-        <Buttons busy={act.busy} onClose={onClose} go="Report the fault" disabled={!what.trim()} />
+        <Buttons busy={act.busy} onClose={onClose} go={tr("Report the fault")} disabled={!what.trim()} />
       </form>
     </Dialog>
   );
@@ -346,7 +346,7 @@ export function ServiceDialog({ asset, task: first, onClose, onDone }: Props & {
           <Field label={tr("What was done")} htmlFor={`${id}-done`} error={act.field("actions_performed")}>
             <textarea id={`${id}-done`} className="textarea" rows={3} value={done} onChange={(e) => setDone(e.target.value)} />
           </Field>
-          <Buttons busy={act.busy} onClose={onClose} go="Log it" disabled={!chosen} />
+          <Buttons busy={act.busy} onClose={onClose} go={tr("Log it")} disabled={!chosen} />
         </form>
       )}
     </Dialog>
@@ -394,7 +394,7 @@ export function VerifyDialog({ asset, onClose, onDone }: Props) {
         <Field label={tr("Note")} htmlFor={`${id}-note`}>
           <textarea id={`${id}-note`} className="textarea" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
-        <Buttons busy={act.busy} onClose={onClose} go={found ? "Verify" : "Mark as not found"} danger={!found} />
+        <Buttons busy={act.busy} onClose={onClose} go={found ? tr("Verify") : tr("Mark as not found")} danger={!found} />
       </form>
     </Dialog>
   );
@@ -442,7 +442,7 @@ export function DetailsDialog({ asset, onClose, onDone }: Props) {
             <DayInput id={`${id}-eol`} value={v.end_of_life_date} onChange={set("end_of_life_date")} max="" required={false} />
           </Field>
         </div>
-        <Buttons busy={act.busy} onClose={onClose} go="Save" />
+        <Buttons busy={act.busy} onClose={onClose} go={tr("Save")} />
       </form>
     </Dialog>
   );

@@ -57,7 +57,7 @@ export interface Bar {
  *  register's names to records. */
 export function bars(rows: RegisterRow[], key: "asset_category" | "location", ids: ReadonlyMap<string, string>, limit = 7): Bar[] {
   const all = rows
-    .map((r) => ({ name: r[key] || (key === "location" ? "No place" : "No category"), assets: r.assets ?? 0, value: r.net_book_value, cost: r.cost }))
+    .map((r) => ({ name: r[key] || (key === "location" ? t("No place") : t("No category")), assets: r.assets ?? 0, value: r.net_book_value, cost: r.cost }))
     .sort((a, b) => compare(b.value, a.value) || a.name.localeCompare(b.name));
   // One more than the limit is shown as itself: "1 more" would say less than its name.
   const shown = all.length > limit + 1 ? all.slice(0, limit) : all;

@@ -67,11 +67,11 @@ function Setup({ onStart }: { onStart: (place: string, next: NextCheck) => void 
 const MARK: Record<Scan["status"], { icon: string; word: string }> = {
   saving: { icon: "refresh", word: "Checking" },
   verified: { icon: "check", word: "Verified" },
-  elsewhere: { icon: "alert", word: "Not where the register has it" },
-  missing: { icon: "alert", word: "Marked as not found" },
-  again: { icon: "check", word: "Already seen on this walk" },
-  refused: { icon: "alert", word: "Not accepted" },
-  unknown: { icon: "alert", word: "No such asset" },
+  elsewhere: { icon: "alert", get word() { return t("Not where the register has it"); } },
+  missing: { icon: "alert", get word() { return t("Marked as not found"); } },
+  again: { icon: "check", get word() { return t("Already seen on this walk"); } },
+  refused: { icon: "alert", get word() { return t("Not accepted"); } },
+  unknown: { icon: "alert", get word() { return t("No such asset"); } },
 };
 
 function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: () => void }) {
@@ -124,7 +124,7 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
         const hit = lookup(entered, [...rows, ...found.current.values()]);
         asset = hit.ambiguous ? "many" : (hit.asset ?? (await fetchOne(entered)));
       }
-      if (asset === "many") return settle(key, { status: "refused", reason: "More than one asset has that serial number. Scan its tag instead." });
+      if (asset === "many") return settle(key, { status: "refused", reason: t("More than one asset has that serial number. Scan its tag instead.") });
       if (!asset) return settle(key, { status: "unknown", reason: t("Nothing is registered under “{entered}”.", { entered }) });
       found.current.set(asset.id, asset);
       if (alreadySeen(latest.current.filter((s) => s.key !== key), asset)) return settle(key, { asset, status: "again" });
@@ -169,7 +169,7 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
   const loseRest = async () => {
     const rest = p.waiting;
     const ok = await confirmDialog({
-      title: t("Mark {length} {value} as not found?", { length: rest.length, value: rest.length === 1 ? "asset" : "assets" }),
+      title: (rest.length === 1 ? t("Mark {length} asset as not found?", { length: rest.length }) : t("Mark {length} assets as not found?", { length: rest.length })),
       message: t("They are listed as not found on the overview until someone finds them again."),
       confirmLabel: t("Mark as not found"),
       danger: true,
@@ -287,7 +287,7 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
                 <li key={a.id}>
                   <div className="ast-scan-body">
                     <Link to={`/a/${a.id}`}>{isolate(title(a, a.id))}</Link>
-                    <div className="faint">{isolate([a.serial_number && `serial ${a.serial_number}`, a.custodian].filter(Boolean).join(" · "))}</div>
+                    <div className="faint">{isolate([a.serial_number && t("serial {serial_number}", { serial_number: a.serial_number }), a.custodian].filter(Boolean).join(" · "))}</div>
                   </div>
                   <button type="button" className="btn btn-default btn-sm" onClick={() => void handle(a.number ?? a.id, a)} aria-label={t("{a} is here", { a: title(a, a.id) })}>
                     {t("It is here")}

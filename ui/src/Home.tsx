@@ -8,7 +8,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { errorMessage, todayIso, t, isolate } from "@ferrum/client";
-import { EmptyState, ErrorState, Icon, useLiveEntity, useShellTitle } from "@ferrum/kit";
+import { EmptyState, ErrorState, Icon, useLiveEntity, useShellTitle, placed } from "@ferrum/kit";
 import { can, useEntityMeta, useMe } from "@ferrum/records";
 import { addMonths, monthEnd, monthStart, relative } from "./dates";
 import { list, report } from "./data";
@@ -178,8 +178,7 @@ function Months({ items, today, money, company }: { items: Month[]; today: strin
         })}
       </ol>
       <p className="ast-legend faint">
-        <span className="ast-key ast-key-booked" aria-hidden="true" /> {t("booked")} <span className="ast-key ast-key-waiting" aria-hidden="true" /> {t("still to book")}
-        <span className="ast-key ast-key-late" aria-hidden="true" /> {t("overdue")} <span className="ast-key ast-key-failed" aria-hidden="true" /> {t("could not be booked")}
+        {placed(t("{p1} booked {p2} still to book{p3} overdue {p4} could not be booked"), { p1: <span className="ast-key ast-key-booked" aria-hidden="true" />, p2: <span className="ast-key ast-key-waiting" aria-hidden="true" />, p3: <span className="ast-key ast-key-late" aria-hidden="true" />, p4: <span className="ast-key ast-key-failed" aria-hidden="true" /> })}
       </p>
     </>
   );
@@ -395,7 +394,7 @@ export function Home() {
     <>
       <section className="ast-tiles" aria-label={t("Totals")}>
         <Tile label={t("Net book value")} value={byCategory.data ? money(totals?.net_book_value) : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${asOf === today ? "" : t(", as of {asOf}", { asOf: dayText(asOf) })}` : undefined} to={registerLink} />
-        <Tile label={t("Cost")} value={byCategory.data ? money(totals?.cost) : <span className="skeleton ast-tile-skel" />} sub="what was paid, with repairs and revaluations" to={registerLink} />
+        <Tile label={t("Cost")} value={byCategory.data ? money(totals?.cost) : <span className="skeleton ast-tile-skel" />} sub={t("what was paid, with repairs and revaluations")} to={registerLink} />
         <Tile label={t("Depreciated")} value={byCategory.data ? `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? t("{value} of the cost", { value: money(totals?.accumulated_depreciation) }) : undefined} to={registerLink}>
           <span className="ast-meter" aria-hidden="true">
             <span style={{ width: `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` }} />
@@ -454,7 +453,7 @@ export function Home() {
               <ul className="ast-lines ast-due">
                 {due.data.rows.slice(0, 6).map((r) => (
                   <li key={`${r.asset_maintenance}-${r.task_name}-${r.next_due_date}`}>
-                    <span className={`badge ${r.days_overdue > 0 ? "badge-red" : "badge-amber"}`}>{r.days_overdue > 0 ? t("{days_overdue} {value} late", { days_overdue: r.days_overdue, value: r.days_overdue === 1 ? "day" : "days" }) : relative(r.next_due_date, today, dayText)}</span>
+                    <span className={`badge ${r.days_overdue > 0 ? "badge-red" : "badge-amber"}`}>{r.days_overdue > 0 ? (r.days_overdue === 1 ? t("{days_overdue} day late", { days_overdue: r.days_overdue }) : t("{days_overdue} days late", { days_overdue: r.days_overdue })) : relative(r.next_due_date, today, dayText)}</span>
                     <span>
                       <strong>{r.task_name ?? t("Maintenance")}</strong>{isolate(" ")}
                       <Link className="faint" to={`/a/${r.asset_id}?tab=maintenance`}>

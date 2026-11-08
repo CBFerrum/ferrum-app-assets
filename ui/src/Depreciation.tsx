@@ -23,14 +23,14 @@ const TIME = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
 const monthYear = (t: number) => new Date(t).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
 
 const WORDS: Record<PointKind, string> = {
-  start: "Put in use",
-  booked: "Booked",
-  due: "Due",
-  planned: "Planned",
-  failed: "Could not be booked",
-  adjustment: "Revalued",
-  repair: "Repair added",
-  disposal: "Left the books",
+  get start() { return tr("Put in use"); },
+  get booked() { return tr("Booked"); },
+  get due() { return tr("Due"); },
+  get planned() { return tr("Planned"); },
+  get failed() { return tr("Could not be booked"); },
+  get adjustment() { return tr("Revalued"); },
+  get repair() { return tr("Repair added"); },
+  get disposal() { return tr("Left the books"); },
 };
 
 /** What changed value besides depreciation, so the line can show its steps. */
@@ -58,7 +58,7 @@ function useValueEvents(asset: Asset) {
 /** What a point changed, in words. */
 function changeText(p: Point, money: (v: unknown) => string): string {
   const amount = money(p.change.replace("-", ""));
-  if (p.kind === "disposal") return "Taken off the books";
+  if (p.kind === "disposal") return tr("Taken off the books");
   if (p.kind === "adjustment") return plot(p.change) < 0 ? tr("Written down by {amount}", { amount }) : tr("Written up by {amount}", { amount });
   if (p.kind === "repair") return tr("Added {amount}", { amount });
   return tr("Depreciation {amount}", { amount });
@@ -172,7 +172,7 @@ function Chart({ points, today, money }: { points: Point[]; today: string; money
         </div>
       )}
       <p className="sr-only" aria-live="polite">
-        {p ? tr("{p}, {value}: {value2}worth {value3} after.", { p: titleOf(p), value: dayText(p.date), value2: p.kind === "start" ? "" : `${changeText(p, money)}; `, value3: money(p.value) }) : ""}
+        {p ? (p.kind === "start" ? tr("{p}, {value}: worth {value3} after.", { p: titleOf(p), value: dayText(p.date), value3: money(p.value) }) : tr("{p}, {value}: {value1}; worth {value3} after.", { p: titleOf(p), value: dayText(p.date), value3: money(p.value), value1: changeText(p, money) })) : ""}
       </p>
     </div>
   );
@@ -208,7 +208,7 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
       )}
       <p className="muted ast-summary">
         {last ? tr("Booked up to {value}. ", { value: dayText(last.date) }) : tr("Nothing booked yet. ")}
-        {next ? tr("Next: {value} {value2} {value3}.", { value: money(next.change.replace("-", "")), value2: daysBetween(today, next.date) < 0 ? "was due" : "on", value3: dayText(next.date) }) : tr("Nothing more is planned.")}
+        {next ? (daysBetween(today, next.date) < 0 ? tr("Next: {value} was due {value3}.", { value: money(next.change.replace("-", "")), value3: dayText(next.date) }) : tr("Next: {value} on {value3}.", { value: money(next.change.replace("-", "")), value3: dayText(next.date) })) : tr("Nothing more is planned.")}
       </p>
       {points.length < 2 ? (
         <p className="muted">{tr("No depreciation is planned for this asset.")}</p>
