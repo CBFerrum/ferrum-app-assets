@@ -103,7 +103,7 @@ export function valueSeries(asset: Input, events: ValueEvent[], today: string): 
     run -= amount;
     const date = day(r.schedule_date);
     const kind: PointKind = r.posting_error ? "failed" : date <= today ? "due" : "planned";
-    const label = kind === "failed" ? "Could not be booked" : kind === "due" ? "Due to be booked" : "Planned";
+    const label = kind === "failed" ? t("Could not be booked") : kind === "due" ? t("Due to be booked") : t("Planned");
     points.push({ key: `r-${r.id}`, date, value: decimal(run), change: decimal(-amount), kind, booked: false, label, error: r.posting_error });
   }
 

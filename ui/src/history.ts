@@ -113,7 +113,7 @@ export function history({ asset, moves, adjustments, repairs, logs, checks, disp
     });
   }
   if (asset.available_for_use_date && asset.available_for_use_date !== asset.purchase_date) {
-    out.push({ key: "inuse", at: asset.available_for_use_date, kind: "inuse", title: t("Put in use"), detail: "Depreciation starts" });
+    out.push({ key: "inuse", at: asset.available_for_use_date, kind: "inuse", title: t("Put in use"), detail: t("Depreciation starts") });
   }
 
   for (const m of moves) {
@@ -122,17 +122,17 @@ export function history({ asset, moves, adjustments, repairs, logs, checks, disp
       out.push({
         ...base,
         kind: "handout",
-        title: t("Handed to {value}", { value: m.to_custodian ?? "a custodian" }),
+        title: t("Handed to {value}", { value: m.to_custodian ?? t("a custodian") }),
         detail: join(m.due_back ? t("due back {f}", { f: f.date(m.due_back) }) : "no return date", m.to_location && m.to_location !== m.from_location && t("at {to_location}", { to_location: m.to_location })),
       });
     } else if (m.purpose === "Receipt") {
-      out.push({ ...base, kind: "takeback", title: t("Taken back from {value}", { value: m.from_custodian ?? "its custodian" }), detail: m.to_location ? t("into {to_location}", { to_location: m.to_location }) : undefined });
+      out.push({ ...base, kind: "takeback", title: t("Taken back from {value}", { value: m.from_custodian ?? t("its custodian") }), detail: m.to_location ? t("into {to_location}", { to_location: m.to_location }) : undefined });
     } else {
       const handedOn = m.to_custodian && m.to_custodian.toLowerCase() !== (m.from_custodian ?? "").toLowerCase();
       out.push({
         ...base,
         kind: "move",
-        title: t("Moved to {value}", { value: m.to_location ?? "another place" }),
+        title: t("Moved to {value}", { value: m.to_location ?? t("another place") }),
         detail: join(m.from_location && t("from {from_location}", { from_location: m.from_location }), handedOn && t("now with {to_custodian}", { to_custodian: String(m.to_custodian) })),
       });
     }
@@ -144,7 +144,7 @@ export function history({ asset, moves, adjustments, repairs, logs, checks, disp
       key: `v-${a.id}`,
       at: a.adjustment_date,
       kind: "value",
-      title: t("{value} to {f}", { value: down ? "Written down" : "Written up", f: f.money(a.new_asset_value ?? "0") }),
+      title: t("{value} to {f}", { value: down ? t("Written down") : t("Written up"), f: f.money(a.new_asset_value ?? "0") }),
       detail: join(a.current_asset_value != null && t("from {f}", { f: f.money(a.current_asset_value) }), a.remarks),
       tone: down ? "warn" : "good",
       to: `e/AssetValueAdjustment/${a.id}`,
@@ -155,9 +155,9 @@ export function history({ asset, moves, adjustments, repairs, logs, checks, disp
     if (r.repair_status === "Cancelled" || r.docstatus === 2) continue;
     const cost = compare(r.repair_cost, "0") > 0 ? (r.capitalize_repair_cost ? t("cost {cost}, added to its value", { cost: f.money(r.repair_cost ?? "0") }) : t("cost {cost}", { cost: f.money(r.repair_cost ?? "0") })) : undefined;
     if (r.repair_status === "Completed") {
-      out.push({ key: `r-${r.id}`, at: r.completion_date ?? r.failure_date, kind: "repair", title: t("Repaired{value}", { value: r.description ? `: ${r.description}` : "" }), detail: join(t("fault reported {f}", { f: f.date(r.failure_date) }), cost), tone: "good", to: `e/AssetRepair/${r.id}` });
+      out.push({ key: `r-${r.id}`, at: r.completion_date ?? r.failure_date, kind: "repair", title: (r.description ? t("Repaired: {description}", { description: r.description }) : t("Repaired")), detail: join(t("fault reported {f}", { f: f.date(r.failure_date) }), cost), tone: "good", to: `e/AssetRepair/${r.id}` });
     } else {
-      out.push({ key: `r-${r.id}`, at: r.failure_date, kind: "fault", title: t("Fault reported{value}", { value: r.description ? `: ${r.description}` : "" }), detail: "out of order until it is repaired", tone: "bad", to: `e/AssetRepair/${r.id}` });
+      out.push({ key: `r-${r.id}`, at: r.failure_date, kind: "fault", title: (r.description ? t("Fault reported: {description}", { description: r.description }) : t("Fault reported")), detail: t("out of order until it is repaired"), tone: "bad", to: `e/AssetRepair/${r.id}` });
     }
   }
 
@@ -176,7 +176,7 @@ export function history({ asset, moves, adjustments, repairs, logs, checks, disp
       key: `c-${c.id}`,
       at: c.verified_on,
       kind: found ? "verified" : "missing",
-      title: found ? t("Verified{value}", { value: where ? ` at ${where}` : "" }) : t("Not found"),
+      title: found ? (where ? t("Verified at {where}", { where }) : t("Verified")) : t("Not found"),
       detail: join(c.note, c.verified_by && t("by {verified_by}", { verified_by: c.verified_by })),
       tone: found ? "good" : "bad",
       to: `e/AssetVerification/${c.id}`,
