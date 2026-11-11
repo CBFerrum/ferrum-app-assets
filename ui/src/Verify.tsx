@@ -8,7 +8,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 import { api, docPath, errorMessage, newKey, todayIso, t, isolate } from "@ferrum/client";
-import { Button, confirmDialog, EmptyState, ErrorState, Field, Icon, Spinner, toast, useShellTitle } from "@ferrum/kit";
+import { Button, confirmDialog, Field, Icon, ListSkeleton, Progress, Spinner, StatePanel, toast, useShellTitle } from "@ferrum/kit";
 import { can, LinkInput, useEntityMeta, useLinkTitle } from "@ferrum/records";
 import { create, list } from "./data";
 import { Tabs } from "./Tabs";
@@ -199,9 +199,9 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
           <span className="muted">{t("expected here, verified")}</span>
           {p.missing > 0 && <span className="badge badge-red">{t("{missing} not found", { missing: p.missing })}</span>}
           {p.elsewhere.length > 0 && <span className="badge badge-amber">{t("{length} from elsewhere", { length: p.elsewhere.length })}</span>}
-          <span className="ast-progress" aria-hidden="true">
-            <span style={{ width: `${p.total ? (p.done / p.total) * 100 : 0}%` }} />
-          </span>
+          <div className="ast-progress">
+            <Progress value={p.total ? (p.done / p.total) * 100 : 0} label={t("Verified here")} tone="good" />
+          </div>
         </div>
         <form className="ast-scan" onSubmit={submit}>
           <input ref={box} className="input" autoFocus autoComplete="off" autoCapitalize="off" spellCheck={false} aria-label={t("Scan or type a tag or serial number")} placeholder={t("Scan or type a tag or serial number")} value={code} onChange={(e) => setCode(e.target.value)} />
@@ -270,17 +270,17 @@ function Walk({ place, next, leave }: { place: string; next: NextCheck; leave: (
             )}
           </div>
           {expected.error ? (
-            <ErrorState error={expected.error} onRetry={() => void expected.refetch()} title={t("The register for this place could not be loaded")} />
+            <StatePanel kind="failed" error={expected.error} onRetry={() => void expected.refetch()} title={t("The register for this place could not be loaded")} />
           ) : !expected.data ? (
             <div className="card-body">
-              <Spinner label={t("Loading what is expected here")} />
+              <ListSkeleton rows={4} />
             </div>
           ) : rows.length === 0 ? (
-            <EmptyState title={t("No assets are registered here")} icon="file">
-              <p className="muted">{t("Anything you scan will be verified and can be moved here.")}</p>
-            </EmptyState>
+            <StatePanel kind="empty" title={t("No assets are registered here")}>
+              {t("Anything you scan will be verified and can be moved here.")}
+            </StatePanel>
           ) : p.waiting.length === 0 ? (
-            <EmptyState title={t("Everything expected here is accounted for")} icon="check" />
+            <StatePanel kind="empty" title={t("Everything expected here is accounted for")} />
           ) : (
             <ul className="ast-waiting">
               {p.waiting.map((a) => (
@@ -309,14 +309,13 @@ export function Verify() {
   const meta = useEntityMeta("AssetVerification");
   const place = sp.get("place");
   const next = (NEXT.find((n) => n.id === sp.get("next"))?.id ?? "category") as NextCheck;
-  if (meta.error) return <ErrorState error={meta.error} onRetry={() => void meta.refetch()} />;
-  if (!meta.data) return <Spinner label={t("Loading")} />;
+  if (meta.error) return <StatePanel kind="failed" error={meta.error} onRetry={() => void meta.refetch()} />;
+  if (!meta.data) return <ListSkeleton rows={4} />;
   if (!can(meta.data.permissions, "create")) {
     return (
-      <EmptyState title={t("Verifying is for asset managers")} icon="alert">
-        <p className="muted">{t("You can see the assets you hold, and when each was last verified, on their pages.")}</p>
-        <Link to="/">{t("Back to the overview")}</Link>
-      </EmptyState>
+      <StatePanel kind="denied" title={t("Verifying is for asset managers")} action={<Link to="/">{t("Back to the overview")}</Link>}>
+        {t("You can see the assets you hold, and when each was last verified, on their pages.")}
+      </StatePanel>
     );
   }
   if (!place) {

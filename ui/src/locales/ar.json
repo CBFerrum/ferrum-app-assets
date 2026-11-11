@@ -92,11 +92,7 @@
   "Last done": "آخر إنجاز",
   "Leave empty if it stays where it is.": "اتركه فارغًا إن بقي في مكانه.",
   "Left the books": "خرج من الدفاتر",
-  "Loading its history": "جارٍ تحميل سجله",
-  "Loading its maintenance": "جارٍ تحميل صيانته",
-  "Loading the maintenance plan": "جارٍ تحميل خطة الصيانة",
   "Loading the photo": "جارٍ تحميل الصورة",
-  "Loading what is expected here": "جارٍ تحميل ما يُتوقع وجوده هنا",
   "Log done": "سجّل الإنجاز",
   "Log it": "سجّله",
   "Log maintenance done…": "سجّل صيانة منجزة…",
@@ -227,7 +223,6 @@
   "This asset has no maintenance plan yet. A plan lists its tasks and how often each falls due; the overview then shows what is coming up.": "ليس لهذا الأصل خطة صيانة بعد. تسرد الخطة مهامه وكم مرة تستحق كل منها؛ ثم تُظهر النظرة العامة ما هو قادم.",
   "This asset is a draft. It starts depreciating, and can be moved or maintained, once it is submitted.": "هذا الأصل مسودة. يبدأ إهلاكه، ويمكن نقله أو صيانته، بمجرد إرساله.",
   "This asset was cancelled. Its depreciation was reversed.": "أُلغي هذا الأصل. وعُكس إهلاكه.",
-  "Totals": "المجاميع",
   "Undo last": "تراجع عن الأخير",
   "Undo {value}": "تراجع عن {value}",
   "Verification": "التحقق",
@@ -322,5 +317,6 @@
   "{value} done": "أُنجز {value}",
   "{value} of the cost": "{value} من التكلفة",
   "{value} to {f}": "{value} إلى {f}",
-  "{value} under way": "{value} قيد التنفيذ"
+  "{value} under way": "{value} قيد التنفيذ",
+  "Verified here": "تم التحقق هنا"
 }

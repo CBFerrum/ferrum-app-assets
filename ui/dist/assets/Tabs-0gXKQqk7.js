@@ -1,1 +1,0 @@
-import{j as s,au as a,t as e}from"./index-BcEdwWpf.js";function t(){return s.jsxs("nav",{className:"ast-tabs","aria-label":e("Assets"),children:[s.jsx(a,{to:"/",end:!0,children:e("Overview")}),s.jsx(a,{to:"/verify",children:e("Verify")})]})}export{t as T};

@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { api, docPath, errorMessage, fetchBlob, todayIso, uploadFile, t as tr, isolate } from "@ferrum/client";
-import { Alert, Button, ErrorState, Icon, PageLoading, TabPanel, Tabs, toast, useLiveEntity, useShellTitle } from "@ferrum/kit";
+import { Alert, Button, Icon, Progress, ReaderSkeleton, StatePanel, TabPanel, Tabs, toast, useLiveEntity, useShellTitle } from "@ferrum/kit";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@ferrum/kit/primitives";
 import { can, CollabPanel, type EntityMeta, useEntityMeta, useRecord } from "@ferrum/records";
 import { DetailsDialog, type DialogKind, DisposeDialog, FaultDialog, MoveDialog, RevalueDialog, ServiceDialog, VerifyDialog } from "./Actions";
@@ -231,8 +231,8 @@ function Numbers({ asset, money }: { asset: Asset; money: (v: unknown) => string
         <dd>
           {pct}% <span className="faint">({isolate(money(asset.accumulated_depreciation))})</span>
         </dd>
-        <dd className="ast-meter" aria-hidden="true">
-          <span style={{ width: `${pct}%` }} />
+        <dd>
+          <Progress value={pct} label={tr("Depreciated")} />
         </dd>
       </div>
       <div>
@@ -279,8 +279,8 @@ function AssetPage({ meta, id }: { meta: EntityMeta; id: string }) {
     if (next === "files") void qc.invalidateQueries({ queryKey: ["assets", "photo-of", id] });
   };
 
-  if (record.error) return <ErrorState error={record.error} onRetry={() => void record.refetch()} />;
-  if (!asset) return <PageLoading />;
+  if (record.error) return <StatePanel kind="failed" error={record.error} onRetry={() => void record.refetch()} />;
+  if (!asset) return <ReaderSkeleton paragraphs={3} />;
   const money = moneyIn(asset._titles?.currency);
   const live = asset.docstatus === 1 && !asset.disposal;
   const open = (kind: DialogKind, task?: string) => setDialog({ kind, task });
@@ -378,7 +378,7 @@ function AssetPage({ meta, id }: { meta: EntityMeta; id: string }) {
 export function AssetRoute() {
   const { id = "" } = useParams();
   const meta = useEntityMeta("Asset");
-  if (meta.error) return <ErrorState error={meta.error} onRetry={() => void meta.refetch()} />;
-  if (!meta.data) return <PageLoading />;
+  if (meta.error) return <StatePanel kind="failed" error={meta.error} onRetry={() => void meta.refetch()} />;
+  if (!meta.data) return <ReaderSkeleton paragraphs={3} />;
   return <AssetPage key={id} meta={meta.data} id={id} />;
 }
