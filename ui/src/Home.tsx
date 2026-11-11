@@ -8,7 +8,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { errorMessage, todayIso, t, isolate } from "@ferrum/client";
-import { EmptyState, ErrorState, Icon, useLiveEntity, useShellTitle, placed } from "@ferrum/kit";
+import { Icon, StatePanel, useLiveEntity, useShellTitle, placed } from "@ferrum/kit";
 import { can, useEntityMeta, useMe } from "@ferrum/records";
 import { addMonths, monthEnd, monthStart, relative } from "./dates";
 import { list, report } from "./data";
@@ -211,9 +211,9 @@ function Attention({ groups, loading, error, retry }: { groups: Group[]; loading
           <Skeleton rows={4} />
         ) : !shown.length ? (
           error ? null : (
-            <EmptyState title={t("Nothing needs attention")} icon="check">
+            <StatePanel kind="empty" className="pt-4 md:pt-4" title={t("Nothing needs attention")}>
               {t("Returns, checks, repairs and depreciation are all where they should be.")}
-            </EmptyState>
+            </StatePanel>
           )
         ) : (
           <ul className="ast-groups">
@@ -373,23 +373,22 @@ export function Home() {
   const setParam = (name: string, value: string | null) => setSp((p) => { const n = new URLSearchParams(p); if (value) n.set(name, value); else n.delete(name); return n; }, { replace: true });
 
   const body = byCategory.error ? (
-    <ErrorState error={byCategory.error} onRetry={() => void byCategory.refetch()} title={t("The register could not be loaded")} />
+    <StatePanel kind="failed" error={byCategory.error} onRetry={() => void byCategory.refetch()} title={t("The register could not be loaded")} />
   ) : byCategory.data && count === 0 && !byCategory.isFetching && asOf === today ? (
-    <EmptyState title={everything ? t("No assets yet") : t("No assets in your care")} icon="file">
-      {everything ? (
-        <>
-          <p className="muted">{t("Assets are made when a purchase invoice buys a fixed asset item. Ones you already own are added by hand.")}</p>
-          {canAdd && (
-            <Link className="btn btn-primary btn-md" to="/e/Asset/new">
-              <Icon name="plus" />
-              {t("Add an asset you own")}
-            </Link>
-          )}
-        </>
-      ) : (
-        <p className="muted">{t("Assets handed to you will appear here.")}</p>
-      )}
-    </EmptyState>
+    <StatePanel
+      kind="empty"
+      title={everything ? t("No assets yet") : t("No assets in your care")}
+      action={
+        everything && canAdd ? (
+          <Link className="btn btn-primary btn-md" to="/e/Asset/new">
+            <Icon name="plus" />
+            {t("Add an asset you own")}
+          </Link>
+        ) : undefined
+      }
+    >
+      {everything ? t("Assets are made when a purchase invoice buys a fixed asset item. Ones you already own are added by hand.") : t("Assets handed to you will appear here.")}
+    </StatePanel>
   ) : (
     <>
       <section className="ast-tiles" aria-label={t("Totals")}>

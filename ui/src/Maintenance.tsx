@@ -2,7 +2,7 @@
 // way, and the faults not yet repaired. Logging work done is one step from the task it is for.
 
 import { Link } from "react-router";
-import { Button, EmptyState, ErrorState, Spinner } from "@ferrum/kit";
+import { Button, ListSkeleton, StatePanel } from "@ferrum/kit";
 import { phrase, urgency } from "./dates";
 import { dayText } from "./format";
 import { type Task, useOpenWork, usePlan } from "./plan";
@@ -23,8 +23,8 @@ function Due({ date, today }: { date?: string | null; today: string }) {
 export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asset; today: string; can: { log: boolean; plan: boolean; fault: boolean }; onLog: (task?: string) => void; onFault: () => void }) {
   const plan = usePlan(asset.id);
   const work = useOpenWork(asset.id);
-  if (plan.error) return <ErrorState error={plan.error} onRetry={() => void plan.refetch()} />;
-  if (plan.isLoading || work.isLoading) return <Spinner label={tr("Loading its maintenance")} />;
+  if (plan.error) return <StatePanel kind="failed" error={plan.error} onRetry={() => void plan.refetch()} />;
+  if (plan.isLoading || work.isLoading) return <ListSkeleton rows={3} />;
   const tasks: Task[] = plan.data?.tasks ?? [];
   const named = new Map(tasks.map((t) => [t.id, t.task_name]));
   const logs = work.data?.logs ?? [];
@@ -64,14 +64,19 @@ export function Maintenance({ asset, today, can, onLog, onFault }: { asset: Asse
           )}
         </div>
         {!plan.data ? (
-          <EmptyState title={tr("No maintenance plan")} icon="calendar">
-            <p className="muted">{tr("A plan lists what this asset needs and how often. The overview then shows what falls due.")}</p>
-            {can.plan && (
-              <Link className="btn btn-primary btn-md" to={`/e/AssetMaintenance/new?asset=${asset.id}`}>
-                {tr("Plan maintenance")}
-              </Link>
-            )}
-          </EmptyState>
+          <StatePanel
+            kind="empty"
+            title={tr("No maintenance plan")}
+            action={
+              can.plan ? (
+                <Link className="btn btn-primary btn-md" to={`/e/AssetMaintenance/new?asset=${asset.id}`}>
+                  {tr("Plan maintenance")}
+                </Link>
+              ) : undefined
+            }
+          >
+            {tr("A plan lists what this asset needs and how often. The overview then shows what falls due.")}
+          </StatePanel>
         ) : (
           <div className="table-wrap">
             <table className="table">
