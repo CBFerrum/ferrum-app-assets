@@ -5,7 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { EmptyState } from "@ferrum/kit";
+import { StatePanel } from "@ferrum/kit";
 import { daysBetween } from "./dates";
 import { list } from "./data";
 import { compact, dayText } from "./format";
@@ -185,9 +185,9 @@ export function Depreciation({ asset, today, money }: { asset: Asset; today: str
 
   if (asset.calculate_depreciation === false) {
     return (
-      <EmptyState title={tr("This asset does not depreciate")} icon="chart">
-        <p className="muted">{tr("It stays on the books at")} {isolate(money(asset.value_after_depreciation))}.</p>
-      </EmptyState>
+      <StatePanel kind="empty" title={tr("This asset does not depreciate")}>
+        {tr("It stays on the books at")} {isolate(money(asset.value_after_depreciation))}.
+      </StatePanel>
     );
   }
   const waiting = points.filter((p) => !p.booked && p.kind !== "start");

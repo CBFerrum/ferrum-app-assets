@@ -6,7 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { api, ApiError, docPath, todayIso, t, isolate } from "@ferrum/client";
-import { EmptyState, ErrorState, Icon, Spinner } from "@ferrum/kit";
+import { Icon, ListSkeleton, StatePanel } from "@ferrum/kit";
 import { list, report } from "./data";
 import { dayText } from "./format";
 import { type Adjustment, type Check, type Disposal, type Entry, type Kind, type Log, type MoveRow, type Repair, history } from "./history";
@@ -55,10 +55,10 @@ export function Story({ asset, money }: { asset: Asset; money: (v: unknown) => s
       return { moves, adjustments, repairs, logs, checks, disposal };
     },
   });
-  if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
-  if (!q.data) return <Spinner label={t("Loading its history")} />;
+  if (q.error) return <StatePanel kind="failed" error={q.error} onRetry={() => void q.refetch()} />;
+  if (!q.data) return <ListSkeleton rows={4} />;
   const entries = history({ asset, ...q.data }, { money, date: dayText });
-  if (!entries.length) return <EmptyState title={t("Nothing has happened yet")} icon="timeline" />;
+  if (!entries.length) return <StatePanel kind="empty" title={t("Nothing has happened yet")} />;
   return (
     <ol className="ast-story">
       {entries.map((e: Entry) => (

@@ -6,7 +6,7 @@
 import { type FormEvent, useId, useState } from "react";
 import { Link } from "react-router";
 import { api, docPath, errorMessage, newKey, shell, todayIso, t as tr, isolate } from "@ferrum/client";
-import { Alert, Button, Dialog, Field, Spinner, toast, placed } from "@ferrum/kit";
+import { Alert, Button, Dialog, Field, FormSkeleton, toast, placed } from "@ferrum/kit";
 import { LinkInput, usePeople } from "@ferrum/records";
 import { action, create, draft, list } from "./data";
 import { dayText, moneyIn } from "./format";
@@ -313,7 +313,7 @@ export function ServiceDialog({ asset, task: first, onClose, onDone }: Props & {
   return (
     <Dialog open onClose={onClose} title={tr("Log maintenance on {asset}", { asset: label(asset) })}>
       {plan.isLoading ? (
-        <Spinner label={tr("Loading the maintenance plan")} />
+        <FormSkeleton fields={3} />
       ) : plan.error ? (
         <Alert tone="error">{isolate(errorMessage(plan.error))}</Alert>
       ) : !plan.data ? (
