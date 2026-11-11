@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { api, docPath, errorMessage, fetchBlob, todayIso, uploadFile, t as tr, isolate } from "@ferrum/client";
-import { Alert, Button, Icon, ReaderSkeleton, StatePanel, TabPanel, Tabs, toast, useLiveEntity, useShellTitle } from "@ferrum/kit";
+import { Alert, Button, Icon, Progress, ReaderSkeleton, StatePanel, TabPanel, Tabs, toast, useLiveEntity, useShellTitle } from "@ferrum/kit";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@ferrum/kit/primitives";
 import { can, CollabPanel, type EntityMeta, useEntityMeta, useRecord } from "@ferrum/records";
 import { DetailsDialog, type DialogKind, DisposeDialog, FaultDialog, MoveDialog, RevalueDialog, ServiceDialog, VerifyDialog } from "./Actions";
@@ -231,8 +231,8 @@ function Numbers({ asset, money }: { asset: Asset; money: (v: unknown) => string
         <dd>
           {pct}% <span className="faint">({isolate(money(asset.accumulated_depreciation))})</span>
         </dd>
-        <dd className="ast-meter" aria-hidden="true">
-          <span style={{ width: `${pct}%` }} />
+        <dd>
+          <Progress value={pct} label={tr("Depreciated")} />
         </dd>
       </div>
       <div>
