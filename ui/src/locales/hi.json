@@ -223,7 +223,6 @@
   "This asset has no maintenance plan yet. A plan lists its tasks and how often each falls due; the overview then shows what is coming up.": "इस संपत्ति की अभी कोई रखरखाव योजना नहीं है। योजना इसके कार्य और हर कार्य कितनी बार देय है बताती है; फिर अवलोकन दिखाता है कि आगे क्या है।",
   "This asset is a draft. It starts depreciating, and can be moved or maintained, once it is submitted.": "यह संपत्ति ड्राफ़्ट है। जमा होने के बाद इसका मूल्यह्रास शुरू होता है और इसे ले जाया या रखरखाव किया जा सकता है।",
   "This asset was cancelled. Its depreciation was reversed.": "यह संपत्ति रद्द की गई। इसका मूल्यह्रास उलट दिया गया।",
-  "Totals": "कुल योग",
   "Undo last": "पिछला पूर्ववत करें",
   "Undo {value}": "{value} पूर्ववत करें",
   "Verification": "सत्यापन",
@@ -318,5 +317,6 @@
   "{value} done": "{value} पूरा",
   "{value} of the cost": "लागत का {value}",
   "{value} to {f}": "{value} से {f}",
-  "{value} under way": "{value} जारी"
+  "{value} under way": "{value} जारी",
+  "Verified here": "यहाँ सत्यापित"
 }

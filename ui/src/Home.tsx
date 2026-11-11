@@ -5,10 +5,10 @@
 // own access, so someone who holds a few assets sees those.
 
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo } from "react";
 import { Link, useSearchParams } from "react-router";
 import { errorMessage, todayIso, t, isolate } from "@ferrum/client";
-import { Icon, StatePanel, useLiveEntity, useShellTitle, placed } from "@ferrum/kit";
+import { Icon, Stat, StatGrid, StatePanel, useLiveEntity, useShellTitle, placed } from "@ferrum/kit";
 import { can, useEntityMeta, useMe } from "@ferrum/records";
 import { addMonths, monthEnd, monthStart, relative } from "./dates";
 import { list, report } from "./data";
@@ -58,26 +58,6 @@ function useCompany(ready: boolean) {
   const id = all.data?.find((c) => c.id === wanted)?.id ?? me?.default_company ?? all.data?.[0]?.id ?? undefined;
   const choose = (company: string) => setSp((p) => { const n = new URLSearchParams(p); n.set("company", company); return n; }, { replace: true });
   return { id, all: all.data ?? [], settled: ready && !all.isLoading, choose };
-}
-
-// ── the totals ──
-
-function Tile({ label, value, sub, to, children }: { label: string; value: ReactNode; sub?: ReactNode; to?: string; children?: ReactNode }) {
-  const body = (
-    <>
-      <span className="ast-tile-label">{isolate(label)}</span>
-      <strong className="ast-tile-value">{value}</strong>
-      {children}
-      {sub && <span className="ast-tile-sub">{sub}</span>}
-    </>
-  );
-  return to ? (
-    <Link className="ast-tile" to={to}>
-      {body}
-    </Link>
-  ) : (
-    <div className="ast-tile">{body}</div>
-  );
 }
 
 // ── where the money is ──
@@ -391,21 +371,23 @@ export function Home() {
     </StatePanel>
   ) : (
     <>
-      <section className="ast-tiles" aria-label={t("Totals")}>
-        <Tile label={t("Net book value")} value={byCategory.data ? money(totals?.net_book_value) : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${asOf === today ? "" : t(", as of {asOf}", { asOf: dayText(asOf) })}` : undefined} to={registerLink} />
-        <Tile label={t("Cost")} value={byCategory.data ? money(totals?.cost) : <span className="skeleton ast-tile-skel" />} sub={t("what was paid, with repairs and revaluations")} to={registerLink} />
-        <Tile label={t("Depreciated")} value={byCategory.data ? `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` : <span className="skeleton ast-tile-skel" />} sub={byCategory.data ? t("{value} of the cost", { value: money(totals?.accumulated_depreciation) }) : undefined} to={registerLink}>
-          <span className="ast-meter" aria-hidden="true">
-            <span style={{ width: `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` }} />
-          </span>
-        </Tile>
-        <Tile
+      <StatGrid>
+        <Stat label={t("Net book value")} value={byCategory.data ? money(totals?.net_book_value) : <span className="skeleton ast-tile-skel" />} hint={byCategory.data ? `${count} ${count === 1 ? "asset" : "assets"}${asOf === today ? "" : t(", as of {asOf}", { asOf: dayText(asOf) })}` : undefined} to={registerLink} />
+        <Stat label={t("Cost")} value={byCategory.data ? money(totals?.cost) : <span className="skeleton ast-tile-skel" />} hint={t("what was paid, with repairs and revaluations")} to={registerLink} />
+        <Stat
+          label={t("Depreciated")}
+          value={byCategory.data ? `${depreciated(totals?.accumulated_depreciation, totals?.cost)}%` : <span className="skeleton ast-tile-skel" />}
+          progress={byCategory.data ? { value: depreciated(totals?.accumulated_depreciation, totals?.cost), label: t("Depreciated") } : undefined}
+          hint={byCategory.data ? t("{value} of the cost", { value: money(totals?.accumulated_depreciation) }) : undefined}
+          to={registerLink}
+        />
+        <Stat
           label={t("Depreciation this month")}
           value={thisMonth ? money(thisMonth.total) : plan.error ? "—" : <span className="skeleton ast-tile-skel" />}
-          sub={thisMonth ? t("{value} booked so far", { value: money(thisMonth.booked) }) : undefined}
+          hint={thisMonth ? t("{value} booked so far", { value: money(thisMonth.booked) }) : undefined}
           to={`/r/asset_depreciation_schedule?${new URLSearchParams({ ...params, from_date: from, to_date: monthEnd(from), run: "1" })}`}
         />
-      </section>
+      </StatGrid>
       <div className="ast-grid">
         <Owned
           by={by}
