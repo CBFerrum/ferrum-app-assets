@@ -299,6 +299,7 @@ CHANGELOG.md  what changed in each version
 
 | Version | Highlights |
 |---|---|
+| **0.3.18** | Rebuilt on the tuned design system: better menu icons, a lighter first page, a visible scroll cue, cleaner print. |
 | **0.3.17** | The redesigned interface: the upgraded design system, shaped loading, told-apart states. |
 | **0.3.16** | Its reports' names in Arabic and Hindi. |
 | **0.3.15** | Its names in Arabic and Hindi; the last English sentences translated. |
