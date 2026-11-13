@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Ferrum Assets: Fixed assets from purchase to disposal, exact to the cent, with every posting in the platform ledger.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Ferrum Assets: What the company owns, where it is and what it is worth, from purchase to depreciation, upkeep and sale.">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d1117"/><stop offset="1" stop-color="#142f27"/></linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d1117"/><stop offset="1" stop-color="#191f27"/></linearGradient>
     <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.07"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
-    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#49b177"/><stop offset="1" stop-color="#2c995d"/></linearGradient>
-    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="#30a665" fill-opacity="0.16"/></pattern>
-    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#30a665" flood-opacity="0.45"/></filter>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d697b"/><stop offset="1" stop-color="#414e61"/></linearGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="#475569" fill-opacity="0.16"/></pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#475569" flood-opacity="0.45"/></filter>
     <clipPath id="card"><rect width="1280" height="360" rx="28"/></clipPath>
     <style>
       text { font-family: Inter, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -18,17 +18,17 @@
   <g clip-path="url(#card)">
     <rect width="1280" height="360" fill="url(#bg)"/>
     <rect width="1280" height="360" fill="url(#dots)"/>
-    <circle cx="1150" cy="20" r="230" fill="#30a665" fill-opacity="0.1"/>
-    <circle cx="1240" cy="350" r="150" fill="#30a665" fill-opacity="0.08"/>
+    <circle cx="1150" cy="20" r="230" fill="#475569" fill-opacity="0.1"/>
+    <circle cx="1240" cy="350" r="150" fill="#475569" fill-opacity="0.08"/>
     <rect class="sheen" x="0" y="-60" width="260" height="480" fill="url(#sheen)"/>
   </g>
   <rect x="0.5" y="0.5" width="1279" height="359" rx="28" fill="none" stroke="#30363d"/>
-  <g class="tile"><g transform="translate(72 102)" filter="url(#shadow)"><rect width="144" height="144" rx="36" fill="url(#tile)"/><g transform="translate(36 36) scale(3)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M12 6h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/><path d="M8 6h.01"/><path d="M9 22v-3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/><rect x="4" y="2" width="16" height="20" rx="2"/></g></g></g>
-  <text x="264" y="138" font-size="17" font-weight="700" fill="#83caa3" letter-spacing="2.4">FERRUM APP</text>
+  <g class="tile"><g transform="translate(72 102)" filter="url(#shadow)"><rect width="144" height="144" rx="36" fill="url(#tile)"/><g transform="translate(36 36) scale(3)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/><path d="m7 16.5-4.74-2.85"/><path d="m7 16.5 5-3"/><path d="M7 16.5v5.17"/><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/><path d="m17 16.5-5-3"/><path d="m17 16.5 4.74-2.85"/><path d="M17 16.5v5.17"/><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/><path d="M12 8 7.26 5.15"/><path d="m12 8 4.74-2.85"/><path d="M12 13.5V8"/></g></g></g>
+  <text x="264" y="138" font-size="17" font-weight="700" fill="#9199a5" letter-spacing="2.4">FERRUM APP</text>
   <text x="262" y="198" font-size="58" font-weight="750" fill="#e6edf3" letter-spacing="-1">Ferrum Assets</text>
-  <text x="264" y="244" font-size="23" fill="#9da7b3">Fixed assets from purchase to disposal, exact to the cent,</text>
-  <text x="264" y="278" font-size="23" fill="#9da7b3">with every posting in the platform ledger.</text>
-  <g><rect x="264" y="310" width="70" height="30" rx="15" fill="#173b2d"/><text x="298.8" y="330" font-size="14.5" font-weight="600" fill="#8dceaa" text-anchor="middle">v0.1.1</text></g>
-  <g><rect x="343.6" y="310" width="147" height="30" rx="15" fill="#173b2d"/><text x="417.1" y="330" font-size="14.5" font-weight="600" fill="#8dceaa" text-anchor="middle">Records screens</text></g>
-  <g><rect x="500.6" y="310" width="87" height="30" rx="15" fill="#173b2d"/><text x="544.0" y="330" font-size="14.5" font-weight="600" fill="#8dceaa" text-anchor="middle">AGPL-3.0</text></g>
+  <text x="264" y="244" font-size="23" fill="#9da7b3">What the company owns, where it is and what it is worth,</text>
+  <text x="264" y="278" font-size="23" fill="#9da7b3">from purchase to depreciation, upkeep and sale.</text>
+  <g><rect x="264" y="310" width="78" height="30" rx="15" fill="#1d242e"/><text x="303.1" y="330" font-size="14.5" font-weight="600" fill="#9aa2ad" text-anchor="middle">v0.3.18</text></g>
+  <g><rect x="352.2" y="310" width="130" height="30" rx="15" fill="#1d242e"/><text x="417.1" y="330" font-size="14.5" font-weight="600" fill="#9aa2ad" text-anchor="middle">Own interface</text></g>
+  <g><rect x="492" y="310" width="87" height="30" rx="15" fill="#1d242e"/><text x="535.4" y="330" font-size="14.5" font-weight="600" fill="#9aa2ad" text-anchor="middle">AGPL-3.0</text></g>
 </svg>
