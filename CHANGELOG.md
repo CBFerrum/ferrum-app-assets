@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+Needs the same platform as 0.3.18. No database or interface change.
+
+**A cancelled disposal reads one shape of what it removed.** Cancelling a disposal puts back the schedule rows it
+removed, from its `schedule_snapshot`. A snapshot written before finance books kept their own depreciation was a bare
+list of the asset's rows, and was still read as such. Every disposal writes `{schedule, books}` and no installation
+holds the older shape, so only that is read.
+
 ## 0.3.18
 
 Rebuilt with Ferrum-Frontend 9e7190c, the design system as tuned after the landed build was reviewed. The left menu's icons are chosen so that none repeats on more than three rows and each fits its row; their drawings load beside the first page instead of inside it, so the page starts lighter; a row that scrolls sideways fades at the edge where there is more, in every browser and with reduced motion; a printed record leaves out empty fields and keeps its totals with the table; menus and popovers sit inside the page's landmarks for assistive technology; a selection bar folds what does not fit into More on a narrow screen. Nothing else changes.

@@ -7,7 +7,7 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-0.3.18-475569?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-475569?style=flat-square)](CHANGELOG.md)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Ferrum platform](https://img.shields.io/badge/runs%20on-Ferrum-2f5bea?style=flat-square)](https://github.com/CBFerrum/Ferrum)
 ![Rust](https://img.shields.io/badge/Rust-server-b7410e?style=flat-square&logo=rust)
@@ -48,7 +48,7 @@ the same books as Ferrum ERP.
 
 | | |
 |---|---|
-| 📦 **Version** | `0.3.18`; the Equipment Maintenance connector `0.1.0` |
+| 📦 **Version** | `0.4.0`; the Equipment Maintenance connector `0.1.0` |
 | 🖥️ **Kind** | Own interface at `/assets/` (overview, an asset's page, verifying a room); every other record in Ferrum's records frame |
 | 🧱 **What it adds** | 2 packages; 16 entities and 7 line tables; 5 roles of its own (2 in Assets, 3 in Equipment Maintenance) and read access for ERP's Accounts Manager; 5 reports; 2 menus; fields on Company, Item, Account, purchase and sales invoice lines and journal entries |
 | 🔗 **Depends on** | Ferrum platform `>=0.3.2, <0.4` and ERP (0.6.0 or later); the connector also needs Operations |
@@ -412,6 +412,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 
 ### ✅ Recently shipped
 
+- [x] **0.4.0** A cancelled disposal reads one shape of the schedule it removed.
 - [x] **0.3.18** Rebuilt on the tuned design system: better menu icons, a lighter first page, cleaner print.
 - [x] **0.3.17** The redesigned interface: kit figures and meters, shaped loading, told-apart states.
 - [x] **0.3.16** Reports' names and parameters in Arabic and Hindi.
