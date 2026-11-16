@@ -5,28 +5,19 @@
 // Assets' modules in the sidebar under the platform's bar. Records open through /open, in the app that
 // shows them: an asset here, its purchase invoice or journal entries in ERP.
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode, useEffect } from "react";
-import { createRoot } from "react-dom/client";
-import { createBrowserRouter, Link, RouterProvider, useRouteError } from "react-router";
-import { addCatalogs, routeBase, shell, t, wordsReady } from "@ferrum/client";
-import { ConfirmHost, StatePanel, Toaster } from "@ferrum/kit";
-import { RequireAuth, setFrameMode } from "@ferrum/records/frame";
+import { useEffect } from "react";
+import { Link, useRouteError } from "react-router";
+import { shell, t } from "@ferrum/client";
+import { StatePanel } from "@ferrum/kit";
+import { mountApp, RequireAuth, setFrameMode } from "@ferrum/records/frame";
 import "./styles.css";
 
-// Its own words in the page's language (src/locales), fetched as the page starts; it is drawn once they are in.
-void addCatalogs({ ar: () => import("./locales/ar.json"), hi: () => import("./locales/hi.json") });
-
 /** A page of the records frame, loaded when first opened. */
-const page = (name: "FormView" | "ListView" | "ReportView" | "AppSettingsPage" | "ScreenPage") => () =>
+const page = (name: "FormView" | "ListView" | "ReportView") => () =>
   import("./records").then((m) => ({ Component: m[name] }));
 
 /** Assets' packages: the sidebar shows their modules. */
 const ASSET_PACKAGES = ["assets", "assets_ops"];
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 30_000 } },
-});
 
 function RouteError() {
   return <StatePanel kind="failed" error={useRouteError()} onRetry={() => window.location.reload()} />;
@@ -46,8 +37,10 @@ function Started() {
 
 setFrameMode("app", ASSET_PACKAGES);
 
-const router = createBrowserRouter(
-  [
+mountApp({
+  route: "assets",
+  catalogs: { ar: () => import("./locales/ar.json"), hi: () => import("./locales/hi.json") },
+  routes: [
     {
       path: "/",
       element: (
@@ -64,24 +57,8 @@ const router = createBrowserRouter(
         { path: "e/:entity", lazy: page("ListView") },
         { path: "e/:entity/:id", lazy: page("FormView") },
         { path: "r/:name", lazy: page("ReportView") },
-        { path: "apps/:app/settings", lazy: page("AppSettingsPage") },
-        { path: "x/:app/:page", lazy: page("ScreenPage") },
         { path: "*", element: <NotFound /> },
       ],
     },
   ],
-  { basename: routeBase("assets") },
-);
-
-// Drawn once the page's words are in (its language's catalogs, fetched as the page starts).
-void wordsReady().then(() =>
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-        <Toaster />
-        <ConfirmHost />
-      </QueryClientProvider>
-    </StrictMode>,
-  ),
-);
+});

@@ -1,0 +1,1 @@
+import{x as s,aG as e,j as a}from"./index-DgTXFCbj.js";function t(){return s.jsxs("nav",{className:"ast-tabs","aria-label":a("Assets"),children:[s.jsx(e,{to:"/",end:!0,children:a("Overview")}),s.jsx(e,{to:"/verify",children:a("Verify")})]})}export{t as T};
