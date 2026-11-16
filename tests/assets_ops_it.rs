@@ -59,7 +59,7 @@ async fn scenario() {
     packages.extend(ferrum_app_assets::packages().unwrap());
     let mut hooks = HookRegistry::default();
     ferrum_domain::register(&mut hooks);
-    ferrum_app_erp::register(&mut hooks);
+    hooks.app("erp", &[], ferrum_app_erp::register);
     ferrum_ops::register(&mut hooks);
     ferrum_app_assets::register(&mut hooks);
     let catalog = Catalog::from_packages(packages).unwrap();
