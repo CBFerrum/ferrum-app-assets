@@ -686,13 +686,9 @@ async fn cut_at(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, o
 }
 
 /// Undoes `depreciate_to_disposal`: each book's disposal row is unbooked and removed, and the plan
-/// it removed comes back (rows it had to unbook come back unbooked, to be booked again). A
-/// snapshot from before finance books kept their own depreciation is the asset's rows alone.
+/// it removed comes back (rows it had to unbook come back unbooked, to be booked again).
 pub(crate) async fn restore_after_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, disposal: Uuid, snapshot: &Value) -> Result<()> {
-    let mut removed: Vec<(Book, Value)> = match snapshot {
-        Value::Array(_) => vec![(None, snapshot.clone())],
-        _ => vec![(None, snapshot["schedule"].clone())],
-    };
+    let mut removed: Vec<(Book, Value)> = vec![(None, snapshot["schedule"].clone())];
     for b in snapshot["books"].as_array().into_iter().flatten() {
         if let Some(bk) = b["finance_book"].as_str().and_then(|v| v.parse().ok()) {
             removed.push((Some(bk), b["rows"].clone()));
