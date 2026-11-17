@@ -81,6 +81,9 @@ async fn scenario() {
         .expect("tenant");
     let session = k.login("mill", "admin@mill.test", "Correct-Horse-9").await.unwrap();
     let admin = k.load_ctx(tenant, session.user, Some(session.token_version), "it".into()).await.unwrap();
+    // Sending work to a machine takes the dispatch role, of an administrator too.
+    k.set_user_roles(&admin, session.user, &["Ops Dispatcher".to_string()]).await.unwrap();
+    let admin = k.load_ctx(tenant, session.user, None, "it".into()).await.unwrap();
     let person = async |email: &str, roles: &[&str]| {
         let id =
             k.create_user(&admin, email, "Someone", Some("Correct-Horse-9"), &roles.iter().map(|r| r.to_string()).collect::<Vec<_>>(), false).await.unwrap();
