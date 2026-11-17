@@ -96,6 +96,17 @@ impl T {
         assert_eq!(found.len(), 1, "{entity} {filters}");
         found[0].clone()
     }
+    /// A company's fiscal year from `start` to `end`: the one it was made with, when it was made in
+    /// that year, else made here.
+    async fn fiscal_year(&self, company: Uuid, name: &str, start: &str, end: &str) -> Doc {
+        let made = self.list(&self.admin, "FiscalYear", json!({"company": company.to_string(), "start_date": start})).await;
+        match made.into_iter().next() {
+            Some(y) => y,
+            None => {
+                self.insert(&self.admin, "FiscalYear", json!({"year_name": name, "company": company.to_string(), "start_date": start, "end_date": end})).await
+            }
+        }
+    }
     async fn count(&self, sql: &str, id: Option<Uuid>) -> i64 {
         let mut tx = self.k.db.tenant_tx(self.tenant).await.unwrap();
         sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_string())).bind(self.tenant).bind(id).fetch_one(&mut *tx).await.unwrap()
@@ -208,6 +219,10 @@ async fn scenario() {
     let inr = t.find_one("Currency", json!({"code": "INR"})).await;
     let company = t.insert(&a, "Company", json!({"company_name": "Acme Industries", "abbr": "AI", "default_currency": inr["id"]})).await;
     let cid = uid(&company);
+    // Only on a day an accounting period holds: the company has its current year; the suite posts back to 2019.
+    for y in 2018..=2025 {
+        t.fiscal_year(cid, &format!("{y}-{:02}", (y + 1) % 100), &format!("{y}-04-01"), &format!("{}-03-31", y + 1)).await;
+    }
     let co = t.get("Company", cid).await;
     let account = |name: &'static str| {
         let t = &t;
@@ -878,8 +893,7 @@ async fn scenario() {
     assert_eq!(t.gl("Furniture and Fixtures").await, Decimal::ZERO);
 
     // ───────────── a closed period stops the upkeep at that row; reopening resumes it ─────────────
-    let fy =
-        t.insert(&a, "FiscalYear", json!({"year_name": "2024-25", "company": cid.to_string(), "start_date": "2024-04-01", "end_date": "2025-03-31"})).await;
+    let fy = t.fiscal_year(cid, "2024-25", "2024-04-01", "2025-03-31").await;
     t.k.run_action(&a, "FiscalYear", uid(&fy), "close_period", json!({"period_start": "2024-04-01"})).await.expect("close April 2024");
     let before = t.depreciation_entries().await;
     t.upkeep().await;
