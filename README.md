@@ -48,10 +48,10 @@ the same books as Ferrum ERP.
 
 | | |
 |---|---|
-| 📦 **Version** | `0.4.0`; the Equipment Maintenance connector `0.1.0` |
+| 📦 **Version** | `0.4.1`; the Equipment Maintenance connector `0.1.0` |
 | 🖥️ **Kind** | Own interface at `/assets/` (overview, an asset's page, verifying a room); every other record in Ferrum's records frame |
 | 🧱 **What it adds** | 2 packages; 16 entities and 7 line tables; 5 roles of its own (2 in Assets, 3 in Equipment Maintenance) and read access for ERP's Accounts Manager; 5 reports; 2 menus; fields on Company, Item, Account, purchase and sales invoice lines and journal entries |
-| 🔗 **Depends on** | Ferrum platform `>=0.3.2, <0.4` and ERP (0.6.0 or later); the connector also needs Operations |
+| 🔗 **Depends on** | Ferrum platform `>=0.3.2, <0.4` and ERP `>=0.1`; the connector also needs Assets `>=0.2` and Operations `>=0.1` |
 | 🤝 **Works with** | ERP (accounts, purchase and sales invoices, stock, finance books, cost centres); Operations (devices and their readings) |
 | 🗣️ **Languages** | English, Arabic and Hindi; pages mirror right to left |
 | 🧪 **Tests** | 17 Rust tests against a real PostgreSQL, 59 interface tests |
@@ -442,7 +442,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 ## 🚀 Install
 
 Assets ships in the official Ferrum server image; an administrator installs it from **Apps** (`/store/`). Installing
-it installs ERP whole if the workspace does not have it yet (ERP 0.6.0 or later). Self-hosters building their own
+it installs ERP whole if the workspace does not have it yet. Self-hosters building their own
 image enable the server's `assets` feature. **Equipment Maintenance** is offered in Apps where Assets and Operations
 are both installed.
 
