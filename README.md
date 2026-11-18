@@ -7,7 +7,7 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-0.4.1-475569?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5.0-475569?style=flat-square)](CHANGELOG.md)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Ferrum platform](https://img.shields.io/badge/runs%20on-Ferrum-2f5bea?style=flat-square)](https://github.com/CBFerrum/Ferrum)
 ![Rust](https://img.shields.io/badge/Rust-server-b7410e?style=flat-square&logo=rust)
@@ -48,10 +48,10 @@ the same books as Ferrum ERP.
 
 | | |
 |---|---|
-| 📦 **Version** | `0.4.1`; the Equipment Maintenance connector `0.1.0` |
+| 📦 **Version** | `0.5.0`; the Equipment Maintenance connector `0.1.0` |
 | 🖥️ **Kind** | Own interface at `/assets/` (overview, an asset's page, verifying a room); every other record in Ferrum's records frame |
 | 🧱 **What it adds** | 2 packages; 16 entities and 7 line tables; 5 roles of its own (2 in Assets, 3 in Equipment Maintenance) and read access for ERP's Accounts Manager; 5 reports; 2 menus; fields on Company, Item, Account, purchase and sales invoice lines and journal entries |
-| 🔗 **Depends on** | Ferrum platform `>=0.3.2, <0.4` and ERP `>=0.1`; the connector also needs Assets `>=0.2` and Operations `>=0.1` |
+| 🔗 **Depends on** | Ferrum platform `>=0.4.0, <0.5` and ERP `>=0.1`; the connector also needs Assets `>=0.2` and Operations `>=0.1` |
 | 🤝 **Works with** | ERP (accounts, purchase and sales invoices, stock, finance books, cost centres); Operations (devices and their readings) |
 | 🗣️ **Languages** | English, Arabic and Hindi; pages mirror right to left |
 | 🧪 **Tests** | 17 Rust tests against a real PostgreSQL, 59 interface tests |
@@ -412,6 +412,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 
 ### ✅ Recently shipped
 
+- [x] **0.5.0**: Upkeep runs one workspace at a time, on whichever replica is free.
 - [x] **0.4.1** Rebuilt on Ferrum-Frontend 06bd1a2: its start through `mountApp`, and no routes to the screens apps no longer have.
 - [x] **0.4.0** A cancelled disposal reads one shape of the schedule it removed.
 - [x] **0.3.18** Rebuilt on the tuned design system: better menu icons, a lighter first page, cleaner print.

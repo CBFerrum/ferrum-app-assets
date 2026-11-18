@@ -59,11 +59,11 @@ pub fn reports() -> Vec<Arc<dyn ReportSource>> {
 }
 
 /// Periodic upkeep: every minute, on one replica at a time (advisory lock); idempotent and cheap.
-/// Books the depreciation that fell due (up to each workspace's today) and opens the maintenance
+/// Books the depreciation that fell due (up to the workspace's today) and opens the maintenance
 /// tasks that came due, notifying their assignees.
-pub async fn maintenance(k: &Kernel) -> Result<()> {
-    periodic::run(k).await?;
-    ops::watch(k).await
+pub async fn maintenance(k: &Kernel, tenant: uuid::Uuid) -> Result<()> {
+    periodic::run(k, tenant).await?;
+    ops::watch(k, tenant).await
 }
 
 /// Whether the workspace has this package (hooks on platform entities run for every workspace).

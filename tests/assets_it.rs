@@ -165,7 +165,7 @@ impl T {
         self.k.load_ctx(self.tenant, id, None, "it".into()).await.expect("ctx")
     }
     async fn upkeep(&self) {
-        ferrum_app_assets::maintenance(&self.k).await.expect("asset upkeep");
+        ferrum_app_assets::maintenance(&self.k, self.tenant).await.expect("asset upkeep");
     }
 }
 
@@ -197,7 +197,6 @@ async fn scenario() {
     }
     let k = Kernel::boot(db, catalog, hooks, KernelSettings::default(), None).await.expect("boot");
     ferrum_domain::maintenance(&k).await.expect("partitions");
-    ferrum_app_erp::maintenance(&k).await.expect("partitions");
     let tenant = k
         .create_tenant(NewTenant {
             slug: "acme".into(),

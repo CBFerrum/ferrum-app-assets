@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+Needs Ferrum 0.4.0 (apps' upkeep runs one workspace at a time, on whichever replica is free).
+
+- **Upkeep is one workspace's.** `maintenance(k, tenant)` books the depreciation due, opens the maintenance tasks due and reads meters and condition rules for the workspace the platform hands it; the lists of workspaces are the platform's.
+
+No database or interface change.
+
 ## 0.4.1
 
 Needs the same platform as 0.4.0. No database change. Interface only, `ui/dist` rebuilt with Ferrum-Frontend `06bd1a2`.

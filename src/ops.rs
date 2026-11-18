@@ -206,26 +206,20 @@ async fn conditions(k: &Kernel, ctx: &Ctx, tx: &mut Tx) -> Result<()> {
     Ok(())
 }
 
-/// Periodic: each workspace with this connector.
-pub async fn watch(k: &Kernel) -> Result<()> {
-    let tenants: Vec<Uuid> = {
-        let mut tx = k.db.system_tx().await?;
-        let exists: Option<String> = sqlx::query_scalar("select to_regclass('e_asset_meter')::text").fetch_one(&mut *tx).await?;
-        let rows = if exists.is_some() {
-            sqlx::query_scalar("select distinct tenant_id from e_asset_meter union select distinct tenant_id from e_condition_rule").fetch_all(&mut *tx).await?
-        } else {
-            vec![]
-        };
-        tx.commit().await?;
-        rows
-    };
-    for tenant in tenants {
-        let ctx = Ctx::system(tenant, k.registry.schema(tenant).await?);
-        let mut tx = k.db.tenant_tx(tenant).await?;
+/// Periodic: one workspace, if it has meters or condition rules.
+pub async fn watch(k: &Kernel, tenant: Uuid) -> Result<()> {
+    let ctx = Ctx::system(tenant, k.registry.schema(tenant).await?);
+    let mut tx = k.db.tenant_tx(tenant).await?;
+    let any: bool =
+        sqlx::query_scalar("select exists (select 1 from e_asset_meter where tenant_id = $1) or exists (select 1 from e_condition_rule where tenant_id = $1)")
+            .bind(tenant)
+            .fetch_one(&mut *tx)
+            .await?;
+    if any {
         meters(k, &ctx, &mut tx).await?;
         conditions(k, &ctx, &mut tx).await?;
-        tx.commit().await?;
     }
+    tx.commit().await?;
     Ok(())
 }
 

@@ -66,7 +66,6 @@ async fn scenario() {
     assert_eq!(catalog.links_out_of_reach("assets_ops"), Vec::<String>::new(), "whoever fills in a link can look up what it points at");
     let k = Kernel::boot(db, catalog, hooks, KernelSettings::default(), None).await.expect("boot");
     ferrum_domain::maintenance(&k).await.unwrap();
-    ferrum_app_erp::maintenance(&k).await.unwrap();
     let tenant = k
         .create_tenant(NewTenant {
             slug: "mill".into(),
@@ -190,7 +189,7 @@ async fn scenario() {
         tx.commit().await.unwrap();
     };
     feed("run.hours", 99.0, 0).await;
-    ferrum_app_assets::ops::watch(&k).await.unwrap();
+    ferrum_app_assets::ops::watch(&k, tenant).await.unwrap();
     let count = async |source: &str| {
         k.list(&admin, "MaintenanceRequest", &ListQuery { filters: parse_filters(&json!({"source": source})).unwrap(), ..Default::default() })
             .await
@@ -200,18 +199,18 @@ async fn scenario() {
     };
     assert_eq!(count("Meter").await, 0, "not due yet");
     feed("run.hours", 101.0, 0).await;
-    ferrum_app_assets::ops::watch(&k).await.unwrap();
-    ferrum_app_assets::ops::watch(&k).await.unwrap();
+    ferrum_app_assets::ops::watch(&k, tenant).await.unwrap();
+    ferrum_app_assets::ops::watch(&k, tenant).await.unwrap();
     assert_eq!(count("Meter").await, 1, "due, once");
     assert_eq!(k.get(&admin, "AssetMeter", meter, false).await.unwrap()["next_service_at"], json!("200"), "and the next service moves on");
 
     feed("vibration.rms", 9.0, 0).await;
-    ferrum_app_assets::ops::watch(&k).await.unwrap();
+    ferrum_app_assets::ops::watch(&k, tenant).await.unwrap();
     assert_eq!(count("Condition").await, 0, "one high minute is not sustained");
     feed("vibration.rms", 9.0, 1).await;
     feed("vibration.rms", 9.0, 2).await;
-    ferrum_app_assets::ops::watch(&k).await.unwrap();
-    ferrum_app_assets::ops::watch(&k).await.unwrap();
+    ferrum_app_assets::ops::watch(&k, tenant).await.unwrap();
+    ferrum_app_assets::ops::watch(&k, tenant).await.unwrap();
     assert_eq!(count("Condition").await, 1, "sustained, once, while it is open");
     let _ = rule;
 }

@@ -1,6 +1,6 @@
 id: assets
 name: Assets
-version: 0.4.1
+version: 0.5.0
 publisher: cbferrum
 summary: "Fixed assets: categories, depreciation schedules and posting, movements, maintenance, revaluation and disposal"
 description: README.md
@@ -9,7 +9,7 @@ license: AGPL-3.0-only
 homepage: https://github.com/CBFerrum/ferrum-app-assets
 support: https://github.com/CBFerrum/ferrum-app-assets/issues
 runtime: native
-platform: ">=0.3.2, <0.4"
+platform: ">=0.4.0, <0.5"
 # Records of ERP (items, customers, accounts, stock): installing it installs ERP.
 requires: {erp: ">=0.1"}
 packages: [assets]
