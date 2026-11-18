@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.8.0
+
+Needs the same platform as 0.7.0. Package `assets` 0.5.0: two new tables (`DepreciationTable` and its rows) and new
+fields; no data to move. New add-on `assets-us` 0.1.0 (package `assets_us`, data only).
+
+- **Depreciation by a table.** A Depreciation Table record gives the percent of what is depreciable for each year of
+  life; its percents total 100 and its years run 1, 2, 3 … without a gap. An asset, a category or a finance book can
+  depreciate by Table: the percents are copied onto the asset while it is a draft (an edited table moves no
+  submitted plan), the life is the table's number of years, periods must be yearly, and the table carries its own
+  convention. Asset Managers keep tables; Asset Users and Accounts Managers read them.
+- **The United States' half-year tables as records.** The add-on `assets-us` seeds the six tables of IRS
+  Publication 946 (2025), Appendix A, Table A-1, each percent with its source beside it, read on 18 November 2026.
+  It is installable once the platform lists `US_TABLES_MANIFEST` beside the app's manifest.
+
+## 0.7.0
+
+Needs the same platform as 0.6.0. Package `assets` 0.4.0: new fields, no new table, no data to move.
+
+- **Sum of Years Digits.** An asset, a category or a finance book can depreciate each year by its share of the
+  digits of the years left (5, 4, 3, 2, 1 of 15 over five years), with the start conventions, and re-planned by the
+  digits left after a value change. A life that is not whole years is refused.
+- **Units of Production.** An asset worn by use (Total Estimated Units, Unit of Use) plans nothing ahead. The new
+  operation `assets.asset.record_usage` (Record Usage, `write` on Asset) sets the units used in a period ending on
+  a day up to today: each book that depreciates by use gets one unbooked row of what is left to depreciate times the
+  units over the units left, so the last usage takes the plan exactly to salvage. A repeat replaces the period's row,
+  0 units takes it back, a booked period is refused. A value adjustment rescales the planned rows, which keep their
+  units; a split divides the estimate and each row's units.
+
+## 0.6.0
+
+Needs the same platform as 0.5.0. Package `assets` 0.3.0: one new field, no new table, no data to move.
+
+- **Mid-Month and Half Year conventions.** A category, an asset or a finance book (new field Depreciation Start
+  Convention, empty: the asset's) can count the first period as half a month or half a year, whatever the day the
+  asset came into use; the rest comes in one extra period at the end. The period an asset is disposed of in is
+  counted the same way, so a half-year asset sold in June is depreciated for half that year, not for its days.
+  Half Year is refused on periods that are not whole years.
+- **The register counts a repair's parts.** A capitalized repair's parts were in the asset's cost but not in the
+  fixed asset register's, so the register did not tie to the ledger.
+- **A split leaves each plan exact.** Each schedule row was divided on its own, so the two assets' plans drifted
+  from what was left to depreciate by up to half a cent a row: one ended above salvage for ever, the other below
+  it. The last unbooked row of each, in each book, now takes the difference; a split that would leave it below
+  zero is refused.
+
 ## 0.5.0
 
 Needs Ferrum 0.4.0 (apps' upkeep runs one workspace at a time, on whichever replica is free).

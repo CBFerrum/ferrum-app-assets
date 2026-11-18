@@ -140,7 +140,7 @@ async fn register(k: &Kernel, ctx: &Ctx, tx: &mut Tx, co: &ReportCompany, p: &Pa
     );
     qb.push(moved).push(" <= ").push_bind(as_of).push(" order by m.transaction_date desc, m.created_at desc limit 1), (select i.source_location ");
     qb.push(moved).push(" > ").push_bind(as_of).push(" order by m.transaction_date, m.created_at limit 1), a.location) as location_id, ");
-    qb.push("a.gross_purchase_amount + coalesce((select sum(r.repair_cost) from e_asset_repair r where r.tenant_id = a.tenant_id and r.asset = a.id \
+    qb.push("a.gross_purchase_amount + coalesce((select sum(r.repair_cost + coalesce(r.parts_cost, 0)) from e_asset_repair r where r.tenant_id = a.tenant_id and r.asset = a.id \
              and r.docstatus = 1 and r.capitalize_repair_cost and r.completion_date <= ")
         .push_bind(as_of)
         .push("), 0) + coalesce((select sum(v.difference_amount) from e_asset_value_adjustment v where v.tenant_id = a.tenant_id and v.asset = a.id and v.docstatus = 1 \

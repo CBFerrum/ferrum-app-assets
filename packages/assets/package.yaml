@@ -1,5 +1,5 @@
 package: assets
-version: 0.2.0
+version: 0.5.0
 label: Assets
 description: Fixed assets - categories with per-company accounts, depreciation schedules posted to the ledger, movements and custody, value adjustments, repairs, maintenance plans, sale and scrapping, capitalization from purchase invoices.
 depends: [accounting, buying, selling]
@@ -38,7 +38,7 @@ modules:
     label: Assets
     icon: building
     order: 55
-    items: [Asset, AssetMovement, AssetVerification, AssetValueAdjustment, AssetRepair, AssetMaintenance, AssetMaintenanceLog, AssetDisposal, AssetCategory, Location,
+    items: [Asset, AssetMovement, AssetVerification, AssetValueAdjustment, AssetRepair, AssetMaintenance, AssetMaintenanceLog, AssetDisposal, AssetCategory, DepreciationTable, Location,
             FinanceBook, report:fixed_asset_register, report:asset_depreciation_schedule, report:asset_movement_history, report:asset_maintenance_due,
             report:asset_disposal_gain_loss]
 
@@ -48,6 +48,7 @@ roles:
     permissions:
       - {entity: Asset, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true, import: true}
       - {entity: AssetCategory, read: true, write: true, create: true, delete: true, export: true, import: true}
+      - {entity: DepreciationTable, read: true, write: true, create: true, delete: true, export: true, import: true}
       - {entity: Location, read: true, write: true, create: true, delete: true, export: true, import: true}
       - {entity: FinanceBook, read: true, write: true, create: true, delete: true}
       - {entity: AssetMovement, read: true, write: true, create: true, delete: true, submit: true, cancel: true, export: true}
@@ -80,6 +81,7 @@ roles:
       - {entity: AssetMaintenanceLog, read: true, write: true, create: true, submit: true, if_owner: true}
       - {entity: AssetRepair, read: true, write: true, create: true, delete: true, if_owner: true}
       - {entity: AssetCategory, read: true}
+      - {entity: DepreciationTable, read: true}
       - {entity: Location, read: true}
       - {entity: FinanceBook, read: true}
       - {entity: Item, read: true}
@@ -88,6 +90,7 @@ roles:
     permissions:
       - {entity: Asset, read: true, export: true}
       - {entity: AssetCategory, read: true}
+      - {entity: DepreciationTable, read: true}
       - {entity: Location, read: true}
       - {entity: FinanceBook, read: true}
       - {entity: AssetMovement, read: true}

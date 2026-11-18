@@ -1243,6 +1243,9 @@ async fn scenario() {
     assert_eq!(amounts(&c), [n("900"); 5]);
     assert_eq!(books_of(&c).iter().map(|r| r.1).collect::<Vec<_>>(), [n("1500"); 3]);
     assert_eq!(t.gl_for("Plant and Machinery", &[repair]).await, n("500"), "the repair and its parts go into the asset");
+    let reg = t.report(&a, "fixed_asset_register", &p(&[("as_of", &today)])).await;
+    let listed = reg["rows"].as_array().unwrap().iter().find(|r| r["asset_id"] == json!(compressor.to_string())).cloned().expect("the compressor is listed");
+    assert_eq!((dec(&listed["cost"]), dec(&c["total_asset_cost"])), (n("4500"), n("4500")), "the register counts the repair's parts too");
     // Undone: the year, the cost and the parts all go back.
     t.cancel(&manager, "AssetRepair", repair).await;
     let c = t.get("Asset", compressor).await;

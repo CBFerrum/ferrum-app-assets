@@ -1,0 +1,17 @@
+# Assets' add-on with the United States' depreciation tables as records (package assets_us, data only).
+# Another country's tables are added the same way, without code.
+id: assets-us
+name: "Assets: United States depreciation tables"
+version: 0.1.0
+publisher: cbferrum
+summary: The half-year tables of the general depreciation system as Depreciation Table records
+categories: [finance]
+license: AGPL-3.0-only
+homepage: https://github.com/CBFerrum/ferrum-app-assets
+support: https://github.com/CBFerrum/ferrum-app-assets/issues
+runtime: native
+platform: ">=0.4.0, <0.5"
+requires: {assets: ">=0.8"}
+parent: assets
+packages: [assets_us]
+uninstall: ask

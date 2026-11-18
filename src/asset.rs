@@ -5,7 +5,7 @@
 //! Engine changes load the submitted asset with a row lock (`open`), change it in memory and
 //! write the difference back (`save`), so every change to one asset is serialized.
 
-use crate::schedule::{self, Method, Plan};
+use crate::schedule::{self, Convention, Method, Plan};
 use crate::setup;
 use crate::{check_places, installed, int, named};
 use async_trait::async_trait;
@@ -59,9 +59,31 @@ pub(crate) fn plan_of(doc: &Doc, precision: u32) -> std::result::Result<Plan, Ve
         errors.push(FieldError::new("available_for_use_date", "is required"));
     }
     match (start, afu) {
-        (None, _) if method != Some(Method::Manual) => errors.push(FieldError::new("depreciation_start_date", "is required")),
+        (None, _) if !matches!(method, Some(Method::Manual | Method::UnitsOfProduction)) => {
+            errors.push(FieldError::new("depreciation_start_date", "is required"))
+        }
         (Some(st), Some(a)) if st < a => errors.push(FieldError::new("depreciation_start_date", "cannot be before the available-for-use date")),
         _ => {}
+    }
+    if method == Some(Method::SumOfYearsDigits) && periods >= 1 && frequency >= 1 && (periods * frequency) % 12 != 0 {
+        errors.push(FieldError::new("total_number_of_depreciations", "sum of years needs a useful life of whole years"));
+    }
+    let table: Vec<Decimal> = doc
+        .get("table_percents")
+        .and_then(Value::as_array)
+        .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_string).or_else(|| v.as_f64().map(|f| f.to_string()))?.parse().ok()).collect())
+        .unwrap_or_default();
+    if method == Some(Method::Table) {
+        if table.is_empty() {
+            errors.push(FieldError::new("depreciation_table", "is required for the table method"));
+        }
+        if frequency >= 1 && frequency != 12 {
+            errors.push(FieldError::new("frequency_of_depreciation", "a table gives a percent a year: use yearly periods"));
+        }
+    }
+    let convention = Convention::parse(s(doc, "start_convention"));
+    if convention == Convention::Mid(12) && frequency >= 1 && frequency % 12 != 0 {
+        errors.push(FieldError::new("start_convention", "Half Year needs depreciation periods of whole years"));
     }
     let opening_booked = int(doc, "opening_number_of_booked_depreciations");
     if opening_booked < 0 || (periods >= 1 && opening_booked > periods) {
@@ -73,12 +95,13 @@ pub(crate) fn plan_of(doc: &Doc, precision: u32) -> std::result::Result<Plan, Ve
         periods: periods as u32,
         frequency: frequency as u32,
         annual_rate: rate,
-        pro_rata: s(doc, "start_convention") != Some("Full First Period"),
+        convention,
         available_for_use: afu,
         start: start.unwrap_or(afu),
         opening_booked: opening_booked as u32,
         salvage: d(doc, "salvage_value"),
         precision,
+        table,
     })
 }
 
@@ -106,6 +129,9 @@ const BOOK_FIELDS: &[&str] = &[
     "opening_accumulated_depreciation",
     "opening_number_of_booked_depreciations",
     "depreciation_start_date",
+    "start_convention",
+    "depreciation_table",
+    "table_percents",
 ];
 
 /// The asset as `book` sees it: the book's settings in place of the asset's.
@@ -509,23 +535,40 @@ pub(crate) async fn replan_in(tx: &mut Tx, ctx: &Ctx, doc: &mut Doc, book: Book,
         )));
     }
     let (booked, planned): (Vec<Doc>, Vec<Doc>) = rows_in(doc, book).into_iter().partition(|r| b(r, "booked"));
-    let fresh: Vec<(NaiveDate, Decimal)> = if plan.method == Method::Manual {
+    let fresh: Vec<Doc> = if plan.by_hand() {
+        // Each row keeps its date and units; only its amount follows the value.
         let amounts: Vec<Decimal> = planned.iter().map(|r| d(r, "depreciation_amount")).collect();
         let (before, after) = (value - change - plan.salvage, value - plan.salvage);
-        let scaled = schedule::rescale(&amounts, before, after, precision).ok_or_else(|| {
-            Error::invalid(format!("asset {} has no depreciation planned to spread this increase over; extend its manual schedule first", named(doc)))
-        })?;
-        planned.iter().map(row_day).zip(scaled).filter(|(_, a)| *a > Decimal::ZERO).collect()
+        let scaled = match schedule::rescale(&amounts, before, after, precision) {
+            Some(scaled) => scaled,
+            // Later usage carries an increase.
+            None if plan.method == Method::UnitsOfProduction => vec![],
+            None => {
+                return Err(Error::invalid(format!(
+                    "asset {} has no depreciation planned to spread this increase over; extend its manual schedule first",
+                    named(doc)
+                )));
+            }
+        };
+        planned
+            .into_iter()
+            .zip(scaled)
+            .filter(|(_, a)| *a > Decimal::ZERO)
+            .map(|(mut r, a)| {
+                set(&mut r, "depreciation_amount", money(a));
+                r
+            })
+            .collect()
     } else {
         let last = booked.iter().filter(|r| id(r, "disposal").is_none()).map(row_day).max();
         let slots: Vec<schedule::Slot> = plan.slots().into_iter().filter(|s| last.is_none_or(|l| s.date > l)).collect();
         if slots.is_empty() && change > Decimal::ZERO {
             return Err(Error::invalid(format!("asset {} has no depreciation periods left to spread this increase over", named(doc))));
         }
-        plan.amounts(&slots, value)
+        plan.amounts(&slots, value).into_iter().map(|(on, a)| new_row(on, a)).collect()
     };
     let mut list = booked;
-    list.extend(fresh.into_iter().map(|(on, a)| new_row(on, a)));
+    list.extend(fresh);
     put_in(doc, book, list);
     Ok(())
 }
@@ -536,8 +579,11 @@ pub(crate) fn extend_life(doc: &mut Doc, months: i64) -> Result<()> {
     if months == 0 {
         return Ok(());
     }
-    if !b(doc, "calculate_depreciation") || s(doc, "depreciation_method") == Some("Manual") {
-        return Err(Error::field("increase_in_asset_life", "only a generated depreciation plan is extended (a manual schedule is changed by hand)"));
+    if !b(doc, "calculate_depreciation") || matches!(s(doc, "depreciation_method"), Some("Manual" | "Units of Production" | "Table")) {
+        return Err(Error::field(
+            "increase_in_asset_life",
+            "only a generated depreciation plan is extended (a manual schedule is changed by hand, units of production by the estimate, a table by its years)",
+        ));
     }
     let mut lives = Vec::new();
     for bk in every(doc) {
@@ -570,7 +616,9 @@ pub(crate) fn extend_life(doc: &mut Doc, months: i64) -> Result<()> {
 
 /// Splits `qty` units off a grouped asset into an asset of their own (one of ten chairs to be sold,
 /// say): its cost, salvage value, opening depreciation and every schedule row, in every book, in
-/// proportion; the asset keeps what rounding leaves. Depreciation already booked stays booked by the
+/// proportion; the asset keeps what rounding leaves, and each plan's last unbooked row takes what
+/// rounding the rows left over, so every plan still ends exactly at salvage (a manual plan: at its
+/// share of what was planned). Depreciation already booked stays booked by the
 /// entries that booked it, which the two then share, so neither can undo it. Repairs and value
 /// adjustments belong to one asset: an asset they changed is not split.
 pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: i64) -> Result<Doc> {
@@ -600,10 +648,22 @@ pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: 
             set(from, field, money(all - part(all)));
         }
     };
+    let planned = |x: &Doc, bk: Book| rows_in(x, bk).iter().filter(|r| !b(r, "booked")).map(|r| d(r, "depreciation_amount")).sum::<Decimal>();
+    let before: HashMap<Book, Decimal> = every(&doc).into_iter().map(|bk| (bk, planned(&doc, bk))).collect();
     let mut new = doc.clone();
     for f in ["gross_purchase_amount", "opening_accumulated_depreciation", "salvage_value"] {
         divide(&mut doc, &mut new, f);
     }
+    // Units (usage, the estimate) are not money: their share to nine places, the rest kept.
+    let share_units = |from: &mut Doc, to: &mut Doc, field: &str| {
+        if from.get(field).is_some_and(|v| !v.is_null()) {
+            let all = d(from, field);
+            let taken = (all * Decimal::from(qty) / Decimal::from(units)).round_dp(9).normalize();
+            set(to, field, taken.to_string());
+            set(from, field, (all - taken).normalize().to_string());
+        }
+    };
+    share_units(&mut doc, &mut new, "total_estimated_units");
     for t in ["finance_books", "schedule", "book_schedule"] {
         let mut kept = rows(&doc, t);
         let mut taken = Vec::new();
@@ -613,10 +673,35 @@ pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: 
             for f in ["depreciation_amount", "opening_accumulated_depreciation", "salvage_value"] {
                 divide(r, &mut c, f);
             }
+            share_units(r, &mut c, "units");
             taken.push(c);
         }
         set(&mut doc, t, Value::Array(kept.into_iter().map(Value::Object).collect()));
         set(&mut new, t, Value::Array(taken.into_iter().map(Value::Object).collect()));
+    }
+    // Each row divided on its own drifts from the divided cost by up to half a cent a row.
+    for (x, split_off) in [(&mut doc, false), (&mut new, true)] {
+        for bk in every(x) {
+            let seen = as_in(x, bk);
+            let target = if matches!(s(&seen, "depreciation_method"), Some("Manual" | "Units of Production")) {
+                let all = before.get(&bk).copied().unwrap_or_default();
+                if split_off { part(all) } else { all - part(all) }
+            } else {
+                (d(x, "gross_purchase_amount") - accumulated(x, bk) - d(&seen, "salvage_value")).max(Decimal::ZERO)
+            };
+            let mut list = rows_in(x, bk);
+            let Some(i) = list.iter().rposition(|r| !b(r, "booked")) else { continue };
+            let difference = target - planned(x, bk);
+            if difference.is_zero() {
+                continue;
+            }
+            let amount = d(&list[i], "depreciation_amount") + difference;
+            if amount < Decimal::ZERO {
+                return Err(Error::invalid(format!("the split of asset {} leaves a row below zero", named(x))));
+            }
+            set(&mut list[i], "depreciation_amount", money(amount));
+            put_in(x, bk, list);
+        }
     }
     set(&mut new, "id", Uuid::now_v7().to_string());
     set(&mut new, "asset_quantity", qty);
@@ -635,17 +720,106 @@ pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: 
     Ok(new)
 }
 
+/// Units used in a period, from an action's parameter: a decimal of 0 or more, at most nine places.
+fn usage_units(params: &Value) -> Result<Decimal> {
+    let bad = || Error::field("units", "must be a number of 0 or more, with at most nine decimal places");
+    let text = match params.get("units") {
+        Some(Value::String(t)) => t.trim().to_string(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => return Err(Error::field("units", "is required")),
+    };
+    let units = text.parse::<Decimal>().map_err(|_| bad())?;
+    if units < Decimal::ZERO || units.normalize().scale() > 9 { Err(bad()) } else { Ok(units.normalize()) }
+}
+
+/// Record Usage: sets the units used in the period ending `period_end`, in every book that
+/// depreciates the asset by use, as one unbooked row each whose depreciation is what is left to
+/// depreciate in that book times the units over the units left (the last usage takes the rest).
+/// A repeat replaces the period's row; 0 units takes it back. Posts nothing: the upkeep books it.
+pub(crate) async fn record_usage(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, params: &Value) -> Result<Value> {
+    let units = usage_units(params)?;
+    let on = params
+        .get("period_end")
+        .and_then(Value::as_str)
+        .and_then(|v| parse_date(&v[..v.len().min(10)]).ok())
+        .ok_or_else(|| Error::field("period_end", "is required (YYYY-MM-DD)"))?;
+    let (mut doc, old) = open(k, ctx, tx, asset).await?;
+    in_service(&doc)?;
+    if on > ctx.today() {
+        return Err(Error::field("period_end", "is today or before"));
+    }
+    if day(&doc, "available_for_use_date").is_some_and(|afu| on < afu) {
+        return Err(Error::field("period_end", "cannot be before the available-for-use date"));
+    }
+    let co = company(k, ctx, tx, id(&doc, "company").unwrap_or_default()).await?;
+    let mut by_use = Vec::new();
+    for bk in every(&doc) {
+        if plan_for(&doc, bk, co.precision).map_err(Error::Validation)?.method == Method::UnitsOfProduction {
+            by_use.push(bk);
+        }
+    }
+    if by_use.is_empty() {
+        return Err(Error::invalid(format!("asset {} does not depreciate by units of production", named(&doc))));
+    }
+    if let Some(until) = by_use.iter().flat_map(|bk| rows_in(&doc, *bk)).filter(|r| b(r, "booked")).map(|r| row_day(&r)).max()
+        && on <= until
+    {
+        return Err(Error::field("period_end", format!("depreciation is booked up to {until}; record usage for a later period")));
+    }
+    let estimate = d(&doc, "total_estimated_units");
+    let mut answer = json!({"schedule_date": on.to_string(), "units": units.to_string(), "depreciation_amount": "0", "units_left": "0"});
+    for bk in by_use {
+        let mut list: Vec<Doc> = rows_in(&doc, bk).into_iter().filter(|r| b(r, "booked") || row_day(r) != on).collect();
+        let used: Decimal = list.iter().map(|r| d(r, "units")).sum();
+        let left = (estimate - used).max(Decimal::ZERO);
+        let planned: Decimal = list.iter().filter(|r| !b(r, "booked")).map(|r| d(r, "depreciation_amount")).sum();
+        let salvage = d(&as_in(&doc, bk), "salvage_value");
+        let room = (net_book_value(tx, ctx, &doc, bk).await? - salvage - planned).max(Decimal::ZERO);
+        let amount = if units.is_zero() || left.is_zero() || room.is_zero() {
+            Decimal::ZERO
+        } else if units >= left {
+            schedule::round(room, co.precision)
+        } else {
+            schedule::round(room * units / left, co.precision).min(room)
+        };
+        if amount > Decimal::ZERO {
+            let mut row = new_row(on, amount);
+            set(&mut row, "units", units.to_string());
+            list.push(row);
+        }
+        put_in(&mut doc, bk, list);
+        if bk.is_none() {
+            answer["depreciation_amount"] = json!(money(amount));
+            answer["units_left"] = json!((left - units).max(Decimal::ZERO).normalize().to_string());
+        }
+    }
+    save(k, ctx, tx, doc, &old, None).await?;
+    Ok(answer)
+}
+
 /// Books depreciation up to a disposal date in every book: rows booked after it are unbooked, rows
-/// due by it are booked, the running period is depreciated for its days up to the date (a row of
-/// its own, marked with the disposal) and the plan after it is removed. Returns the removed rows,
+/// due by it are booked, the running period is depreciated up to the date by the book's start
+/// convention (a row of its own, marked with the disposal) and the plan after it is removed. Returns the removed rows,
 /// which a cancelled disposal puts back: `{"schedule": [...], "books": [{"finance_book", "rows"}]}`.
 pub(crate) async fn depreciate_to_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, on: NaiveDate, disposal: Uuid, precision: u32) -> Result<Value> {
+    // A Mid convention counts the period the asset leaves in by its blocks, never in full: its row
+    // dated the disposal day stays to be cut.
+    let edge = |doc: &Doc, bk: Book| match Convention::parse(s(&as_in(doc, bk), "start_convention")) {
+        Convention::Mid(_) => on.pred_opt().unwrap_or(on),
+        _ => on,
+    };
     for bk in every(doc) {
-        while let Some(i) = rows_in(doc, bk).iter().rposition(|r| b(r, "booked") && row_day(r) > on) {
+        let edge = edge(doc, bk);
+        while let Some(i) = rows_in(doc, bk).iter().rposition(|r| b(r, "booked") && row_day(r) > edge) {
             unbook(k, ctx, tx, doc, bk, i).await?;
         }
     }
-    book_until(k, ctx, tx, doc, on).await?;
+    for bk in every(doc) {
+        let edge = edge(doc, bk);
+        while let Some(i) = rows_in(doc, bk).iter().position(|r| !b(r, "booked")).filter(|&i| row_day(&rows_in(doc, bk)[i]) <= edge) {
+            book(k, ctx, tx, doc, bk, i).await?;
+        }
+    }
     let mut snapshot = json!({"schedule": [], "books": []});
     for bk in every(doc) {
         let removed = cut_at(k, ctx, tx, doc, bk, on, disposal, precision).await?;
@@ -661,7 +835,8 @@ pub(crate) async fn depreciate_to_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, d
     Ok(snapshot)
 }
 
-/// `book`'s running period depreciated up to the disposal date and the rest of its plan removed.
+/// `book`'s running period depreciated up to the disposal date (by `Plan::leaving_amount`) and the
+/// rest of its plan removed.
 #[allow(clippy::too_many_arguments)]
 async fn cut_at(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, on: NaiveDate, disposal: Uuid, precision: u32) -> Result<Value> {
     let mut list = rows_in(doc, book);
@@ -671,8 +846,7 @@ async fn cut_at(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, o
         removed.iter().map(|r| json!({"schedule_date": r.get("schedule_date"), "depreciation_amount": r.get("depreciation_amount")})).collect();
     let plan = plan_for(doc, book, precision).map_err(Error::Validation)?;
     let next = &removed[0];
-    let start = plan.period_start(row_day(next), list.last().map(row_day));
-    let amount = schedule::partial(d(next, "depreciation_amount"), start, row_day(next), on, precision);
+    let amount = plan.leaving_amount(d(next, "depreciation_amount"), row_day(next), list.last().map(row_day), on);
     if amount > Decimal::ZERO {
         let mut row = new_row(on, amount);
         set(&mut row, "disposal", disposal.to_string());
@@ -712,6 +886,14 @@ pub(crate) async fn restore_after_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, d
     Ok(())
 }
 
+/// A depreciation table's percents in year order, and its number of years.
+async fn table_percents(hc: &mut HookCtx<'_>, table: Uuid) -> Result<(Value, usize)> {
+    let t = get(hc.kernel, hc.ctx, hc.tx, "DepreciationTable", table).await?;
+    let mut list: Vec<(i64, Decimal)> = rows(&t, "rows").iter().map(|r| (int(r, "year"), d(r, "percent"))).collect();
+    list.sort_by_key(|r| r.0);
+    Ok((Value::Array(list.iter().map(|r| json!(r.1.normalize().to_string())).collect()), list.len()))
+}
+
 /// Fills what the user left empty: name and category from the item, depreciation settings from
 /// the category, the available-for-use and first depreciation dates, the cost center.
 async fn defaults(hc: &mut HookCtx<'_>, doc: &mut Doc) -> Result<()> {
@@ -730,11 +912,40 @@ async fn defaults(hc: &mut HookCtx<'_>, doc: &mut Doc) -> Result<()> {
         && let Some(cat) = id(doc, "asset_category")
     {
         let c = get(hc.kernel, hc.ctx, hc.tx, "AssetCategory", cat).await?;
-        for f in ["depreciation_method", "total_number_of_depreciations", "frequency_of_depreciation", "rate_of_depreciation", "start_convention"] {
+        for f in [
+            "depreciation_method",
+            "total_number_of_depreciations",
+            "frequency_of_depreciation",
+            "rate_of_depreciation",
+            "start_convention",
+            "depreciation_table",
+        ] {
             if doc.get(f).is_none_or(Value::is_null) {
                 set(doc, f, c.get(f).cloned().unwrap_or(Value::Null));
             }
         }
+    }
+    // A table's percents are copied while the asset is a draft: one edited later moves no submitted plan.
+    if b(doc, "calculate_depreciation") {
+        if s(doc, "depreciation_method") == Some("Table")
+            && let Some(t) = id(doc, "depreciation_table")
+        {
+            let (percents, years) = table_percents(hc, t).await?;
+            set(doc, "table_percents", percents);
+            set(doc, "total_number_of_depreciations", years);
+        }
+        let mut list = rows(doc, "finance_books");
+        for r in list.iter_mut() {
+            let seen = as_in(doc, id(r, "finance_book"));
+            if s(&seen, "depreciation_method") == Some("Table")
+                && let Some(t) = id(&seen, "depreciation_table")
+            {
+                let (percents, years) = table_percents(hc, t).await?;
+                set(r, "table_percents", percents);
+                set(r, "total_number_of_depreciations", years);
+            }
+        }
+        set(doc, "finance_books", Value::Array(list.into_iter().map(Value::Object).collect()));
     }
     if s(doc, "available_for_use_date").is_none() {
         set(doc, "available_for_use_date", doc.get("purchase_date").cloned().unwrap_or(Value::Null));
@@ -903,6 +1114,9 @@ impl DocHook for AssetHook {
                     if depreciable < Decimal::ZERO {
                         errors.push(FieldError::new("salvage_value", "cannot exceed the net book value"));
                     }
+                    if plan.method == Method::UnitsOfProduction && d(doc, "total_estimated_units") <= Decimal::ZERO {
+                        errors.push(FieldError::new("total_estimated_units", "units of production needs the units it is expected to give over its life"));
+                    }
                     if plan.method == Method::Manual {
                         let list = schedule_rows(doc);
                         let mut previous: Option<NaiveDate> = None;
@@ -1033,6 +1247,10 @@ impl DocHook for AssetHook {
     /// thing, not part of what was booked, so they stay editable on a submitted asset (which the
     /// form cannot do). A field left out of the parameters stays as it is; an empty one is cleared.
     async fn action(&self, hc: &mut HookCtx<'_>, name: &str, doc: &Doc, params: &Value) -> Result<Option<Value>> {
+        if name == "record_usage" {
+            let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
+            return record_usage(hc.kernel, hc.ctx, hc.tx, asset, params).await.map(Some);
+        }
         if name == "split_asset" {
             let asset = id(doc, "id").ok_or_else(|| Error::internal("asset without id"))?;
             let qty = params

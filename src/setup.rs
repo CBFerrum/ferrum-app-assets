@@ -181,6 +181,21 @@ impl DocHook for ItemHook {
     }
 }
 
+/// A depreciation table's years run 1, 2, 3 … without a gap (its rule checks the percents total 100).
+pub struct TableHook;
+
+#[async_trait]
+impl DocHook for TableHook {
+    async fn validate(&self, _hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
+        let mut years: Vec<i64> = rows(doc, "rows").iter().map(|r| r.get("year").and_then(Value::as_i64).unwrap_or(0)).collect();
+        years.sort_unstable();
+        if years.iter().enumerate().any(|(i, y)| *y != i as i64 + 1) {
+            return Err(Error::field("rows", "the years must run 1, 2, 3 … without a gap or a repeat"));
+        }
+        Ok(())
+    }
+}
+
 pub struct CategoryHook;
 
 #[async_trait]
