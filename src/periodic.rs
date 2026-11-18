@@ -1,4 +1,4 @@
-//! The per-minute upkeep, for every active workspace with the package: books the depreciation
+//! The per-minute upkeep of one workspace: books the depreciation
 //! that fell due (up to the workspace's today) and opens the maintenance tasks that came due.
 
 use crate::{asset, maintenance};
@@ -10,33 +10,15 @@ use uuid::Uuid;
 /// Most rows booked per workspace per round; the rest follow in the next rounds.
 const BATCH: usize = 500;
 
-pub(crate) async fn run(k: &Kernel) -> Result<()> {
-    let tenants: Vec<Uuid> = {
-        let mut tx = k.db.system_tx().await?;
-        let t = sqlx::query_scalar("select id from tenant where status = 'active' order by id").fetch_all(&mut *tx).await?;
-        tx.commit().await?;
-        t
-    };
-    for tenant in tenants {
-        let schema = match k.registry.schema(tenant).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(%tenant, "asset upkeep skipped: {e}");
-                continue;
-            }
-        };
-        if !schema.packages.iter().any(|p| p == "assets") {
-            continue;
-        }
-        let ctx = Ctx::system(tenant, schema);
-        match depreciate(k, &ctx).await {
-            Ok(n) if n > 0 => tracing::info!(%tenant, booked = n, "depreciation booked"),
-            Ok(_) => {}
-            Err(e) => tracing::warn!(%tenant, "depreciation posting failed: {e}"),
-        }
-        if let Err(e) = maintenance::open_due_tasks(k, &ctx).await {
-            tracing::warn!(%tenant, "opening due maintenance failed: {e}");
-        }
+pub(crate) async fn run(k: &Kernel, tenant: Uuid) -> Result<()> {
+    let ctx = Ctx::system(tenant, k.registry.schema(tenant).await?);
+    match depreciate(k, &ctx).await {
+        Ok(n) if n > 0 => tracing::info!(%tenant, booked = n, "depreciation booked"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(%tenant, "depreciation posting failed: {e}"),
+    }
+    if let Err(e) = maintenance::open_due_tasks(k, &ctx).await {
+        tracing::warn!(%tenant, "opening due maintenance failed: {e}");
     }
     Ok(())
 }
