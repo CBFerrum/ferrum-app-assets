@@ -1,9 +1,10 @@
 //! Depreciation maths: pure and exact (decimals, no I/O), so every rule is unit-tested.
 //!
 //! A plan's periods ("slots") follow from the asset's settings: the first depreciation date, then
-//! every `frequency` months (month ends stay month ends). With the pro-rata convention a first
-//! period the asset was in use for only part of is depreciated for its share of days, and the
-//! share it missed is taken in one extra period at the end. Amounts are rounded to the currency's
+//! every `frequency` months (month ends stay month ends). A first period the asset was in use for
+//! only part of is depreciated for its share by the start convention (days, or half of the block of
+//! months it started in), and the share it missed is taken in one extra period at the end; the
+//! period it leaves in is counted the same way. Amounts are rounded to the currency's
 //! precision and the last row takes what is left, so a schedule ends exactly at the salvage value
 //! and never goes below it.
 
@@ -31,6 +32,30 @@ impl Method {
     }
 }
 
+/// How much of the period it starts (and leaves) in an asset counts for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Convention {
+    /// By days in use.
+    ProRataDays,
+    /// The first period counts in full.
+    FullFirstPeriod,
+    /// In use from (and until) the middle of the block of `n` months the date falls in: Mid-Month
+    /// is `Mid(1)`, Half Year `Mid(12)`. Periods must be whole blocks.
+    Mid(u32),
+}
+
+impl Convention {
+    /// The convention a select value names; empty is Pro-rata by Days.
+    pub fn parse(s: Option<&str>) -> Convention {
+        match s {
+            Some("Full First Period") => Convention::FullFirstPeriod,
+            Some("Mid-Month") => Convention::Mid(1),
+            Some("Half Year") => Convention::Mid(12),
+            _ => Convention::ProRataDays,
+        }
+    }
+}
+
 /// An asset's depreciation settings.
 #[derive(Debug, Clone)]
 pub struct Plan {
@@ -41,7 +66,7 @@ pub struct Plan {
     pub frequency: u32,
     /// Written down value: percent a year.
     pub annual_rate: Decimal,
-    pub pro_rata: bool,
+    pub convention: Convention,
     pub available_for_use: NaiveDate,
     /// First depreciation date (for an existing asset: the next one).
     pub start: NaiveDate,
@@ -90,14 +115,33 @@ pub fn default_start(available_for_use: NaiveDate, frequency: u32) -> NaiveDate 
 }
 
 impl Plan {
-    /// Share of the first period the asset is in use: 1 for a full period (or without pro-rata).
+    /// Share of the first period the asset is in use: 1 for a full period (or by its convention).
     pub fn first_share(&self) -> Decimal {
-        if !self.pro_rata || self.opening_booked > 0 {
+        if self.opening_booked > 0 {
             return Decimal::ONE;
         }
-        let full = (self.start - add_months(self.start, -(self.frequency as i32))).num_days();
-        let used = (self.start - self.available_for_use).num_days() + 1;
-        if full <= 0 || used >= full { Decimal::ONE } else { Decimal::from(used.max(0)) / Decimal::from(full) }
+        match self.convention {
+            Convention::FullFirstPeriod => Decimal::ONE,
+            Convention::ProRataDays => {
+                let full = (self.start - add_months(self.start, -(self.frequency as i32))).num_days();
+                let used = (self.start - self.available_for_use).num_days() + 1;
+                if full <= 0 || used >= full { Decimal::ONE } else { Decimal::from(used.max(0)) / Decimal::from(full) }
+            }
+            Convention::Mid(u) => {
+                let begin = add_months(self.start, -(self.frequency as i32));
+                if self.available_for_use <= begin {
+                    return Decimal::ONE;
+                }
+                let n = self.blocks(u);
+                let b = (0..n).find(|i| self.available_for_use <= add_months(begin, ((i + 1) * u) as i32)).unwrap_or(n - 1);
+                Decimal::from(2 * (n - b) - 1) / Decimal::from(2 * n)
+            }
+        }
+    }
+
+    /// Blocks of `u` months in a period (at least one; `plan_of` refuses periods that are not whole blocks).
+    fn blocks(&self, u: u32) -> u32 {
+        (self.frequency / u.max(1)).max(1)
     }
 
     /// Every period still to depreciate, in date order.
@@ -142,9 +186,35 @@ impl Plan {
     pub fn period_start(&self, end: NaiveDate, previous: Option<NaiveDate>) -> NaiveDate {
         match previous {
             Some(p) => p,
-            None if self.method == Method::Manual || (self.pro_rata && self.opening_booked == 0) => (self.available_for_use - Duration::days(1)).min(end),
+            None if self.method == Method::Manual || (self.convention == Convention::ProRataDays && self.opening_booked == 0) => {
+                (self.available_for_use - Duration::days(1)).min(end)
+            }
             None => add_months(end, -(self.frequency as i32)),
         }
+    }
+
+    /// What the row of `amount` for the period ending `end` (after `previous`) depreciates when the
+    /// asset leaves on `on`: by days, or under a Mid convention to the middle of the block `on`
+    /// falls in, less what the period's start left out (a first part period) and never more than
+    /// the asset is in use for in it (the part period at the end of the plan).
+    pub fn leaving_amount(&self, amount: Decimal, end: NaiveDate, previous: Option<NaiveDate>, on: NaiveDate) -> Decimal {
+        let u = match self.convention {
+            Convention::Mid(u) if self.method != Method::Manual => u,
+            _ => return partial(amount, self.period_start(end, previous), end, on, self.precision),
+        };
+        let n = self.blocks(u);
+        let begin = add_months(end, -(self.frequency as i32));
+        if on <= begin {
+            return round(Decimal::ZERO, self.precision);
+        }
+        let c = (0..n).find(|i| on <= add_months(begin, ((i + 1) * u) as i32)).unwrap_or(n - 1);
+        let out = Decimal::from(2 * c + 1) / Decimal::from(2 * n);
+        let w = self.slots().iter().find(|s| s.date == end).map_or(Decimal::ONE, |s| s.weight);
+        let first = previous.is_none() && self.opening_booked == 0;
+        let inn = if first { Decimal::ONE - w } else { Decimal::ZERO };
+        let until = if !first && w < Decimal::ONE { w } else { Decimal::ONE };
+        let taken = (out.min(until) - inn).clamp(Decimal::ZERO, w);
+        round(amount * taken / w, self.precision)
     }
 }
 
@@ -225,7 +295,7 @@ mod tests {
             periods,
             frequency,
             annual_rate: Decimal::ZERO,
-            pro_rata: true,
+            convention: Convention::ProRataDays,
             available_for_use: afu,
             start,
             opening_booked: 0,
@@ -274,7 +344,7 @@ mod tests {
         assert_eq!(rows[1].0, d(2023, 2, 28));
         assert_eq!(rows[12], (d(2024, 1, 31), n("45.16")));
         assert_eq!(rows.iter().map(|r| r.1).sum::<Decimal>(), n("1200"));
-        let full = Plan { pro_rata: false, ..p };
+        let full = Plan { convention: Convention::FullFirstPeriod, ..p };
         assert_eq!(full.slots().len(), 12, "full first period: no extra period");
         assert_eq!(amounts(&full, "1200")[0], "100.00");
     }
@@ -311,7 +381,7 @@ mod tests {
         assert_eq!(p.first_share(), n("182") / n("365"));
         assert_eq!(amounts(&p, "10000"), ["1994.52", "3202.19", "1921.32", "2881.97"]);
         // A high rate reaches the salvage value early: nothing below it, no empty rows.
-        let steep = Plan { annual_rate: n("90"), salvage: n("500"), pro_rata: false, ..p };
+        let steep = Plan { annual_rate: n("90"), salvage: n("500"), convention: Convention::FullFirstPeriod, ..p };
         assert_eq!(amounts(&steep, "1000"), ["500.00"]);
     }
 
@@ -336,8 +406,92 @@ mod tests {
         let p = plan(Method::StraightLine, 12, 1, d(2023, 1, 15), d(2023, 1, 31));
         assert_eq!(p.period_start(d(2023, 1, 31), None), d(2023, 1, 14), "the first period starts on the available-for-use date");
         assert_eq!(p.period_start(d(2023, 2, 28), Some(d(2023, 1, 31))), d(2023, 1, 31));
-        let full = Plan { pro_rata: false, ..p };
+        let full = Plan { convention: Convention::FullFirstPeriod, ..p };
         assert_eq!(full.period_start(d(2023, 1, 31), None), d(2022, 12, 31));
+    }
+
+    fn mid(u: u32, periods: u32, frequency: u32, afu: NaiveDate, start: NaiveDate) -> Plan {
+        Plan { convention: Convention::Mid(u), ..plan(Method::StraightLine, periods, frequency, afu, start) }
+    }
+
+    #[test]
+    fn half_year_takes_half_first_and_last() {
+        // Whatever the day: in use from March 10, the first year counts as half.
+        let p = mid(12, 5, 12, d(2021, 3, 10), d(2021, 12, 31));
+        assert_eq!(p.first_share(), n("0.5"));
+        assert_eq!(amounts(&p, "10000"), ["1000.00", "2000.00", "2000.00", "2000.00", "2000.00", "1000.00"]);
+        assert_eq!(p.slots().last().map(|s| s.date), Some(d(2026, 12, 31)));
+        let early = mid(12, 5, 12, d(2021, 12, 31), d(2021, 12, 31));
+        assert_eq!(early.first_share(), n("0.5"), "on the last day of the year too");
+        let before = mid(12, 5, 12, d(2020, 12, 31), d(2021, 12, 31));
+        assert_eq!(before.first_share(), Decimal::ONE, "in use before the period began");
+    }
+
+    #[test]
+    fn mid_month_in_monthly_periods() {
+        let p = mid(1, 12, 1, d(2023, 1, 20), d(2023, 1, 31));
+        let rows = amounts(&p, "1200");
+        assert_eq!(rows.len(), 13);
+        assert_eq!((rows[0].as_str(), rows[12].as_str()), ("50.00", "50.00"));
+        assert!(rows[1..12].iter().all(|a| a == "100.00"));
+        assert_eq!(p.period_start(d(2023, 1, 31), None), d(2022, 12, 31), "a whole period, not the day it came into use");
+    }
+
+    #[test]
+    fn mid_month_in_yearly_periods() {
+        // From March 15: half of March and nine more months, 9.5 of 12.
+        let p = mid(1, 2, 12, d(2023, 3, 15), d(2023, 12, 31));
+        assert_eq!(p.first_share(), n("19") / n("24"));
+        assert_eq!(amounts(&p, "2400"), ["950.00", "1200.00", "250.00"]);
+    }
+
+    #[test]
+    fn declining_balance_with_half_year() {
+        let p = mid(12, 5, 12, d(2021, 3, 10), d(2021, 12, 31));
+        let ddb = Plan { method: Method::DoubleDecliningBalance, ..p };
+        assert_eq!(amounts(&ddb, "10000"), ["2000.00", "3200.00", "1920.00", "1152.00", "691.20", "1036.80"]);
+    }
+
+    #[test]
+    fn shares_stay_within_a_period() {
+        // Every block an asset can start or leave in, for both Mid conventions.
+        for (u, frequency) in [(1, 1), (1, 3), (1, 12), (12, 12), (12, 24)] {
+            for k in 0..(frequency * 2) {
+                let afu = add_months(d(2022, 12, 31), k as i32) - Duration::days(3);
+                let p = mid(u, 4, frequency, afu, default_start(afu, frequency));
+                let share = p.first_share();
+                assert!(share > Decimal::ZERO && share <= Decimal::ONE, "{u} {frequency} {afu}: {share}");
+                let slots = p.slots();
+                for (i, s) in slots.iter().enumerate() {
+                    let previous = i.checked_sub(1).map(|j| slots[j].date);
+                    let begin = previous.unwrap_or_else(|| add_months(s.date, -(frequency as i32)));
+                    for m in 0..=frequency {
+                        let on = add_months(begin, m as i32);
+                        let a = p.leaving_amount(n("100"), s.date, previous, on);
+                        assert!(a >= Decimal::ZERO && a <= n("100"), "{u} {frequency} {afu} {on}: {a}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn leaving_by_blocks() {
+        let p = mid(12, 5, 12, d(2021, 3, 10), d(2021, 12, 31));
+        assert_eq!(p.leaving_amount(n("1000"), d(2021, 12, 31), None, d(2021, 11, 30)), n("0.00"), "in and out the same year");
+        assert_eq!(p.leaving_amount(n("2000"), d(2023, 12, 31), Some(d(2022, 12, 31)), d(2023, 2, 1)), n("1000.00"), "a later year counts half");
+        assert_eq!(p.leaving_amount(n("2000"), d(2023, 12, 31), Some(d(2022, 12, 31)), d(2023, 12, 31)), n("1000.00"), "even out on its last day");
+        assert_eq!(p.leaving_amount(n("1000"), d(2026, 12, 31), Some(d(2025, 12, 31)), d(2026, 6, 30)), n("1000.00"), "the part row at the end in full");
+        assert_eq!(p.leaving_amount(n("2000"), d(2023, 12, 31), Some(d(2022, 12, 31)), d(2022, 12, 31)), n("0.00"), "before the period");
+        let month = mid(1, 2, 12, d(2023, 3, 15), d(2023, 12, 31));
+        assert_eq!(month.leaving_amount(n("950"), d(2023, 12, 31), None, d(2023, 8, 10)), n("500.00"), "mid-March to mid-August of 9.5 months");
+        let days = plan(Method::StraightLine, 12, 1, d(2023, 1, 15), d(2023, 1, 31));
+        for on in [d(2023, 1, 20), d(2023, 1, 31)] {
+            assert_eq!(days.leaving_amount(n("54.84"), d(2023, 1, 31), None, on), partial(n("54.84"), d(2023, 1, 14), d(2023, 1, 31), on, 2));
+        }
+        let full = Plan { convention: Convention::FullFirstPeriod, ..days };
+        let on = d(2023, 3, 15);
+        assert_eq!(full.leaving_amount(n("100"), d(2023, 3, 31), Some(d(2023, 2, 28)), on), partial(n("100"), d(2023, 2, 28), d(2023, 3, 31), on, 2));
     }
 
     #[test]

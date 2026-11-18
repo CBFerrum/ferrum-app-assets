@@ -38,11 +38,11 @@
     - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year), visible_if: "doc.depreciation_method == 'Written Down Value'", required_if: "doc.depreciation_method == 'Written Down Value'"}
     - name: start_convention
       type: select
-      options: [Pro-rata by Days, Full First Period]
+      options: [Pro-rata by Days, Full First Period, Mid-Month, Half Year]
       required: true
       default: Pro-rata by Days
       label: Depreciation Start Convention
-      description: "Pro-rata by Days: the first period is depreciated for the days from the available-for-use date, and the remainder in one extra period at the end. Full First Period: the first period counts in full."
+      description: "Pro-rata by Days: the first period is depreciated for the days from the available-for-use date, and the remainder in one extra period at the end. Full First Period: the first period counts in full. Mid-Month: the month it is first used counts as half a month. Half Year: the first period counts as half, whatever the day (needs periods of whole years). Either way the rest comes in one extra period at the end, and the period it is disposed of in is counted the same way."
     - {name: enable_cwip_accounting, type: check, label: Enable Capital Work in Progress Accounting, description: Purchases are booked to the CWIP account and move to the fixed asset account when the asset is submitted}
     - {name: group_assets, type: check, label: One Asset per Purchase Line, description: "A purchase invoice line of 10 units makes one asset of quantity 10 instead of ten assets"}
     - {name: accounts, type: table, of: AssetCategoryAccount, label: Accounts per Company}
@@ -73,6 +73,7 @@
     - {name: total_number_of_depreciations, type: int, min: 1, max: 1200, in_list: true}
     - {name: frequency_of_depreciation, type: int, min: 1, max: 120, label: Frequency of Depreciation (Months), in_list: true}
     - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year)}
+    - {name: start_convention, type: select, options: [Pro-rata by Days, Full First Period, Mid-Month, Half Year], label: Depreciation Start Convention, description: "Empty: the asset's"}
     - {name: salvage_value, type: currency, min: "0"}
     - {name: opening_accumulated_depreciation, type: currency, min: "0", description: "For an existing asset: what this book had depreciated before it was registered (its entry is yours to make, as for the asset's own)"}
     - {name: opening_number_of_booked_depreciations, type: int, min: 0}
@@ -132,7 +133,7 @@
     - {name: total_number_of_depreciations, type: int, min: 1, max: 1200, visible_if: "doc.calculate_depreciation"}
     - {name: frequency_of_depreciation, type: int, min: 1, max: 120, label: Frequency of Depreciation (Months), visible_if: "doc.calculate_depreciation"}
     - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year), visible_if: "doc.calculate_depreciation && doc.depreciation_method == 'Written Down Value'"}
-    - {name: start_convention, type: select, options: [Pro-rata by Days, Full First Period], label: Depreciation Start Convention, visible_if: "doc.calculate_depreciation"}
+    - {name: start_convention, type: select, options: [Pro-rata by Days, Full First Period, Mid-Month, Half Year], label: Depreciation Start Convention, visible_if: "doc.calculate_depreciation"}
     - {name: depreciation_start_date, type: date, visible_if: "doc.calculate_depreciation", description: "First depreciation date; default the end of the first period (for existing assets: the next depreciation date)"}
     - {name: salvage_value, type: currency, currency: currency, min: "0", default: 0, label: Salvage Value, description: Value expected at the end of its useful life; never depreciated}
     - {name: schedule, type: table, of: AssetDepreciationSchedule, label: Depreciation Schedule, description: "Generated from the settings, except for the Manual method where you enter it"}

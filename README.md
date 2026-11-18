@@ -7,7 +7,7 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-0.5.0-475569?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0-475569?style=flat-square)](CHANGELOG.md)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Ferrum platform](https://img.shields.io/badge/runs%20on-Ferrum-2f5bea?style=flat-square)](https://github.com/CBFerrum/Ferrum)
 ![Rust](https://img.shields.io/badge/Rust-server-b7410e?style=flat-square&logo=rust)
@@ -48,13 +48,13 @@ the same books as Ferrum ERP.
 
 | | |
 |---|---|
-| 📦 **Version** | `0.5.0`; the Equipment Maintenance connector `0.1.0` |
+| 📦 **Version** | `0.6.0`; the Equipment Maintenance connector `0.1.0` |
 | 🖥️ **Kind** | Own interface at `/assets/` (overview, an asset's page, verifying a room); every other record in Ferrum's records frame |
 | 🧱 **What it adds** | 2 packages; 16 entities and 7 line tables; 5 roles of its own (2 in Assets, 3 in Equipment Maintenance) and read access for ERP's Accounts Manager; 5 reports; 2 menus; fields on Company, Item, Account, purchase and sales invoice lines and journal entries |
 | 🔗 **Depends on** | Ferrum platform `>=0.4.0, <0.5` and ERP `>=0.1`; the connector also needs Assets `>=0.2` and Operations `>=0.1` |
 | 🤝 **Works with** | ERP (accounts, purchase and sales invoices, stock, finance books, cost centres); Operations (devices and their readings) |
 | 🗣️ **Languages** | English, Arabic and Hindi; pages mirror right to left |
-| 🧪 **Tests** | 17 Rust tests against a real PostgreSQL, 59 interface tests |
+| 🧪 **Tests** | 24 Rust tests (3 suites against a real PostgreSQL), 59 interface tests |
 | 📄 **Licence** | AGPL-3.0-only |
 
 ## 📸 Screenshots
@@ -156,10 +156,12 @@ the same books as Ferrum ERP.
 ### 🧮 Depreciation
 
 - **Methods**: straight line, written down value, double declining balance, and manual (you enter the schedule).
-- **Conventions**: pro-rata by days (the part of the first period missed is taken in one extra period at the end)
-  or full first period.
+- **Conventions**: pro-rata by days, full first period, mid-month (the month it is first used counts as half) or
+  half year (the first period counts as half, whatever the day; periods of whole years). The part of the first
+  period missed is taken in one extra period at the end, and the period the asset is disposed of in is counted
+  the same way. A finance book can keep its own (half a year in the tax book beside days in the common books).
 - **Exact schedules**: decimals only, month ends stay month ends, the last row takes what rounding leaves, and a
-  schedule never goes below the salvage value.
+  schedule never goes below the salvage value; after a split, each part's plan still ends exactly at it.
 - **Booked by itself**: the upkeep books every row that falls due, oldest first, one row per transaction, so an
   interrupted round leaves whole rows booked and a second run finds nothing to do. A row that cannot be booked
   (a closed period, a disabled account) keeps its reason, and the Asset Managers are told once.
@@ -362,7 +364,7 @@ Fixed Assets, Odoo (Assets and Maintenance) and ERPNext, the usual choices for a
 | Sum-of-years and units of production | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Tax depreciation tables (MACRS and the like) | ❌ | ✅ | ✅ | ✅ | ❌ | 🟡 |
 | Several books, each with its own schedule | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Half-year and mid-month conventions | 🟡 ¹ | ✅ | ✅ | ✅ | 🟡 | 🟡 |
+| Half-year and mid-month conventions | ✅ ¹ | ✅ | ✅ | ✅ | 🟡 | 🟡 |
 | Depreciation posted to the ledger by itself | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ |
 | Assets made from purchase invoices | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ |
 | Capital work in progress | ✅ | ✅ | ✅ | 🟡 | 🟡 | ✅ |
@@ -385,7 +387,7 @@ Fixed Assets, Odoo (Assets and Maintenance) and ERPNext, the usual choices for a
 | Open source | ✅ | ❌ | ❌ | ❌ | 🟡 | ✅ |
 | No per-user licence fee | ✅ | ❌ | ❌ | ❌ | 🟡 | ✅ |
 
-<sub>¹ Pro-rata by days or a full first period. ² A grouped asset is split, then one part disposed of; no transfer
+<sub>¹ Pro-rata by days, a full first period, mid-month or half year, each book its own. ² A grouped asset is split, then one part disposed of; no transfer
 between companies. ³ With the Equipment Maintenance connector and Ferrum's Operations app. ⁴ Requests, logs and
 repairs, without planned labour, reserved spares or downtime taken off a workstation's capacity. For the leaders,
 🟡 means partly, or through another edition, module or partner product.</sub>
@@ -400,7 +402,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 
 ### 🚧 Where the leaders are still ahead
 
-- 🧮 More depreciation methods, conventions and tax tables (sum-of-years, units of production, MACRS).
+- 🧮 More depreciation methods and tax tables (sum-of-years, units of production, MACRS).
 - 📄 Lease accounting under IFRS 16 and ASC 842.
 - 🏢 Partial disposal, transfer between companies and composite assets from several invoices.
 - 🛠️ Full maintenance work orders with labour, spare parts and downtime.
@@ -412,6 +414,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 
 ### ✅ Recently shipped
 
+- [x] **0.6.0** Mid-month and half-year conventions, at the start and at disposal; the register counts a repair's parts; a split leaves each plan exact.
 - [x] **0.5.0**: Upkeep runs one workspace at a time, on whichever replica is free.
 - [x] **0.4.1** Rebuilt on Ferrum-Frontend 06bd1a2: its start through `mountApp`, and no routes to the screens apps no longer have.
 - [x] **0.4.0** A cancelled disposal reads one shape of the schedule it removed.
@@ -426,7 +429,6 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 
 **Depreciation**
 - [ ] Sum-of-years and units-of-production methods, for assets worn by use.
-- [ ] Half-year and mid-month conventions, which many tax rules require.
 - [ ] Country tax depreciation (US MACRS, India's block of assets) as finance books.
 
 **The asset's life**

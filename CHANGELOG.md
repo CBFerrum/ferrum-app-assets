@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0
+
+Needs the same platform as 0.5.0. Package `assets` 0.3.0: one new field, no new table, no data to move.
+
+- **Mid-Month and Half Year conventions.** A category, an asset or a finance book (new field Depreciation Start
+  Convention, empty: the asset's) can count the first period as half a month or half a year, whatever the day the
+  asset came into use; the rest comes in one extra period at the end. The period an asset is disposed of in is
+  counted the same way, so a half-year asset sold in June is depreciated for half that year, not for its days.
+  Half Year is refused on periods that are not whole years.
+- **The register counts a repair's parts.** A capitalized repair's parts were in the asset's cost but not in the
+  fixed asset register's, so the register did not tie to the ledger.
+- **A split leaves each plan exact.** Each schedule row was divided on its own, so the two assets' plans drifted
+  from what was left to depreciate by up to half a cent a row: one ended above salvage for ever, the other below
+  it. The last unbooked row of each, in each book, now takes the difference; a split that would leave it below
+  zero is refused.
+
 ## 0.5.0
 
 Needs Ferrum 0.4.0 (apps' upkeep runs one workspace at a time, on whichever replica is free).

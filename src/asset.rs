@@ -5,7 +5,7 @@
 //! Engine changes load the submitted asset with a row lock (`open`), change it in memory and
 //! write the difference back (`save`), so every change to one asset is serialized.
 
-use crate::schedule::{self, Method, Plan};
+use crate::schedule::{self, Convention, Method, Plan};
 use crate::setup;
 use crate::{check_places, installed, int, named};
 use async_trait::async_trait;
@@ -63,6 +63,10 @@ pub(crate) fn plan_of(doc: &Doc, precision: u32) -> std::result::Result<Plan, Ve
         (Some(st), Some(a)) if st < a => errors.push(FieldError::new("depreciation_start_date", "cannot be before the available-for-use date")),
         _ => {}
     }
+    let convention = Convention::parse(s(doc, "start_convention"));
+    if convention == Convention::Mid(12) && frequency >= 1 && frequency % 12 != 0 {
+        errors.push(FieldError::new("start_convention", "Half Year needs depreciation periods of whole years"));
+    }
     let opening_booked = int(doc, "opening_number_of_booked_depreciations");
     if opening_booked < 0 || (periods >= 1 && opening_booked > periods) {
         errors.push(FieldError::new("opening_number_of_booked_depreciations", "cannot exceed the total number of depreciations"));
@@ -73,7 +77,7 @@ pub(crate) fn plan_of(doc: &Doc, precision: u32) -> std::result::Result<Plan, Ve
         periods: periods as u32,
         frequency: frequency as u32,
         annual_rate: rate,
-        pro_rata: s(doc, "start_convention") != Some("Full First Period"),
+        convention,
         available_for_use: afu,
         start: start.unwrap_or(afu),
         opening_booked: opening_booked as u32,
@@ -106,6 +110,7 @@ const BOOK_FIELDS: &[&str] = &[
     "opening_accumulated_depreciation",
     "opening_number_of_booked_depreciations",
     "depreciation_start_date",
+    "start_convention",
 ];
 
 /// The asset as `book` sees it: the book's settings in place of the asset's.
@@ -570,7 +575,9 @@ pub(crate) fn extend_life(doc: &mut Doc, months: i64) -> Result<()> {
 
 /// Splits `qty` units off a grouped asset into an asset of their own (one of ten chairs to be sold,
 /// say): its cost, salvage value, opening depreciation and every schedule row, in every book, in
-/// proportion; the asset keeps what rounding leaves. Depreciation already booked stays booked by the
+/// proportion; the asset keeps what rounding leaves, and each plan's last unbooked row takes what
+/// rounding the rows left over, so every plan still ends exactly at salvage (a manual plan: at its
+/// share of what was planned). Depreciation already booked stays booked by the
 /// entries that booked it, which the two then share, so neither can undo it. Repairs and value
 /// adjustments belong to one asset: an asset they changed is not split.
 pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: i64) -> Result<Doc> {
@@ -600,6 +607,8 @@ pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: 
             set(from, field, money(all - part(all)));
         }
     };
+    let planned = |x: &Doc, bk: Book| rows_in(x, bk).iter().filter(|r| !b(r, "booked")).map(|r| d(r, "depreciation_amount")).sum::<Decimal>();
+    let before: HashMap<Book, Decimal> = every(&doc).into_iter().map(|bk| (bk, planned(&doc, bk))).collect();
     let mut new = doc.clone();
     for f in ["gross_purchase_amount", "opening_accumulated_depreciation", "salvage_value"] {
         divide(&mut doc, &mut new, f);
@@ -617,6 +626,30 @@ pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: 
         }
         set(&mut doc, t, Value::Array(kept.into_iter().map(Value::Object).collect()));
         set(&mut new, t, Value::Array(taken.into_iter().map(Value::Object).collect()));
+    }
+    // Each row divided on its own drifts from the divided cost by up to half a cent a row.
+    for (x, split_off) in [(&mut doc, false), (&mut new, true)] {
+        for bk in every(x) {
+            let seen = as_in(x, bk);
+            let target = if s(&seen, "depreciation_method") == Some("Manual") {
+                let all = before.get(&bk).copied().unwrap_or_default();
+                if split_off { part(all) } else { all - part(all) }
+            } else {
+                (d(x, "gross_purchase_amount") - accumulated(x, bk) - d(&seen, "salvage_value")).max(Decimal::ZERO)
+            };
+            let mut list = rows_in(x, bk);
+            let Some(i) = list.iter().rposition(|r| !b(r, "booked")) else { continue };
+            let difference = target - planned(x, bk);
+            if difference.is_zero() {
+                continue;
+            }
+            let amount = d(&list[i], "depreciation_amount") + difference;
+            if amount < Decimal::ZERO {
+                return Err(Error::invalid(format!("the split of asset {} leaves a row below zero", named(x))));
+            }
+            set(&mut list[i], "depreciation_amount", money(amount));
+            put_in(x, bk, list);
+        }
     }
     set(&mut new, "id", Uuid::now_v7().to_string());
     set(&mut new, "asset_quantity", qty);
@@ -636,16 +669,28 @@ pub(crate) async fn split(k: &Kernel, ctx: &Ctx, tx: &mut Tx, asset: Uuid, qty: 
 }
 
 /// Books depreciation up to a disposal date in every book: rows booked after it are unbooked, rows
-/// due by it are booked, the running period is depreciated for its days up to the date (a row of
-/// its own, marked with the disposal) and the plan after it is removed. Returns the removed rows,
+/// due by it are booked, the running period is depreciated up to the date by the book's start
+/// convention (a row of its own, marked with the disposal) and the plan after it is removed. Returns the removed rows,
 /// which a cancelled disposal puts back: `{"schedule": [...], "books": [{"finance_book", "rows"}]}`.
 pub(crate) async fn depreciate_to_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, on: NaiveDate, disposal: Uuid, precision: u32) -> Result<Value> {
+    // A Mid convention counts the period the asset leaves in by its blocks, never in full: its row
+    // dated the disposal day stays to be cut.
+    let edge = |doc: &Doc, bk: Book| match Convention::parse(s(&as_in(doc, bk), "start_convention")) {
+        Convention::Mid(_) => on.pred_opt().unwrap_or(on),
+        _ => on,
+    };
     for bk in every(doc) {
-        while let Some(i) = rows_in(doc, bk).iter().rposition(|r| b(r, "booked") && row_day(r) > on) {
+        let edge = edge(doc, bk);
+        while let Some(i) = rows_in(doc, bk).iter().rposition(|r| b(r, "booked") && row_day(r) > edge) {
             unbook(k, ctx, tx, doc, bk, i).await?;
         }
     }
-    book_until(k, ctx, tx, doc, on).await?;
+    for bk in every(doc) {
+        let edge = edge(doc, bk);
+        while let Some(i) = rows_in(doc, bk).iter().position(|r| !b(r, "booked")).filter(|&i| row_day(&rows_in(doc, bk)[i]) <= edge) {
+            book(k, ctx, tx, doc, bk, i).await?;
+        }
+    }
     let mut snapshot = json!({"schedule": [], "books": []});
     for bk in every(doc) {
         let removed = cut_at(k, ctx, tx, doc, bk, on, disposal, precision).await?;
@@ -661,7 +706,8 @@ pub(crate) async fn depreciate_to_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, d
     Ok(snapshot)
 }
 
-/// `book`'s running period depreciated up to the disposal date and the rest of its plan removed.
+/// `book`'s running period depreciated up to the disposal date (by `Plan::leaving_amount`) and the
+/// rest of its plan removed.
 #[allow(clippy::too_many_arguments)]
 async fn cut_at(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, on: NaiveDate, disposal: Uuid, precision: u32) -> Result<Value> {
     let mut list = rows_in(doc, book);
@@ -671,8 +717,7 @@ async fn cut_at(k: &Kernel, ctx: &Ctx, tx: &mut Tx, doc: &mut Doc, book: Book, o
         removed.iter().map(|r| json!({"schedule_date": r.get("schedule_date"), "depreciation_amount": r.get("depreciation_amount")})).collect();
     let plan = plan_for(doc, book, precision).map_err(Error::Validation)?;
     let next = &removed[0];
-    let start = plan.period_start(row_day(next), list.last().map(row_day));
-    let amount = schedule::partial(d(next, "depreciation_amount"), start, row_day(next), on, precision);
+    let amount = plan.leaving_amount(d(next, "depreciation_amount"), row_day(next), list.last().map(row_day), on);
     if amount > Decimal::ZERO {
         let mut row = new_row(on, amount);
         set(&mut row, "disposal", disposal.to_string());
