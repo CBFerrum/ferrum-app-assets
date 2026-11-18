@@ -31,7 +31,7 @@
   description: Depreciation defaults and accounts shared by similar assets.
   fields:
     - {name: category_name, type: data, required: true, unique: true, in_list: true}
-    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Manual], required: true, default: Straight Line, in_list: true, in_filter: true}
+    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Sum of Years Digits, Units of Production, Manual], required: true, default: Straight Line, in_list: true, in_filter: true}
     - {name: total_number_of_depreciations, type: int, required: true, min: 1, max: 1200, in_list: true, description: Useful life in depreciation periods}
     - {name: frequency_of_depreciation, type: int, required: true, min: 1, max: 120, default: 12, label: Frequency of Depreciation (Months), in_list: true}
     - {name: verification_interval_months, type: int, min: 1, max: 120, label: Verify Every (Months), in_list: true, description: How often assets of this category are physically checked; empty means no routine check}
@@ -56,6 +56,7 @@
   fields:
     - {name: schedule_date, type: date, required: true, in_list: true}
     - {name: depreciation_amount, type: currency, required: true, min: "0", in_list: true}
+    - {name: units, type: decimal, read_only: true, in_list: true, description: "Units used in the period (Units of Production)"}
     - {name: accumulated_depreciation, type: currency, read_only: true, in_list: true, description: Including opening accumulated depreciation}
     - {name: booked, type: check, read_only: true, no_copy: true, in_list: true}
     - {name: journal_entry, type: link, to: JournalEntry, read_only: true, no_copy: true, in_list: true}
@@ -69,7 +70,7 @@
   description: A finance book that depreciates the asset its own way (IFRS beside the tax rules, say). What it leaves empty is the asset's.
   fields:
     - {name: finance_book, type: link, to: FinanceBook, required: true, in_list: true}
-    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance], in_list: true}
+    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Sum of Years Digits], in_list: true}
     - {name: total_number_of_depreciations, type: int, min: 1, max: 1200, in_list: true}
     - {name: frequency_of_depreciation, type: int, min: 1, max: 120, label: Frequency of Depreciation (Months), in_list: true}
     - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year)}
@@ -89,6 +90,7 @@
     - {name: finance_book, type: link, to: FinanceBook, required: true, in_list: true}
     - {name: schedule_date, type: date, required: true, in_list: true}
     - {name: depreciation_amount, type: currency, required: true, min: "0", in_list: true}
+    - {name: units, type: decimal, read_only: true, in_list: true, description: "Units used in the period (Units of Production)"}
     - {name: accumulated_depreciation, type: currency, read_only: true, in_list: true, description: Including the book's opening accumulated depreciation}
     - {name: booked, type: check, read_only: true, no_copy: true, in_list: true}
     - {name: journal_entry, type: link, to: JournalEntry, read_only: true, no_copy: true, in_list: true}
@@ -129,10 +131,12 @@
     - {name: opening_accumulated_depreciation, type: currency, currency: currency, min: "0", visible_if: "doc.is_existing_asset", description: Depreciation booked before this asset was registered}
     - {name: opening_number_of_booked_depreciations, type: int, min: 0, default: 0, visible_if: "doc.is_existing_asset", description: Depreciation periods already behind it}
     - {name: calculate_depreciation, type: check, default: true, description: Off for assets that do not depreciate (land)}
-    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Manual], visible_if: "doc.calculate_depreciation", description: Defaults to the category's}
+    - {name: depreciation_method, type: select, options: [Straight Line, Written Down Value, Double Declining Balance, Sum of Years Digits, Units of Production, Manual], visible_if: "doc.calculate_depreciation", description: Defaults to the category's}
     - {name: total_number_of_depreciations, type: int, min: 1, max: 1200, visible_if: "doc.calculate_depreciation"}
     - {name: frequency_of_depreciation, type: int, min: 1, max: 120, label: Frequency of Depreciation (Months), visible_if: "doc.calculate_depreciation"}
     - {name: rate_of_depreciation, type: percent, min: "0", max: "100", label: Rate of Depreciation (% a Year), visible_if: "doc.calculate_depreciation && doc.depreciation_method == 'Written Down Value'"}
+    - {name: total_estimated_units, type: decimal, min: "0.000000001", label: Total Estimated Units, visible_if: "doc.calculate_depreciation && doc.depreciation_method == 'Units of Production'", required_if: "doc.calculate_depreciation && doc.depreciation_method == 'Units of Production'", description: "What it is expected to produce or run over its life, in the unit below"}
+    - {name: usage_unit, type: data, max_length: 40, label: Unit of Use, visible_if: "doc.calculate_depreciation && doc.depreciation_method == 'Units of Production'", description: "hours, km, pieces"}
     - {name: start_convention, type: select, options: [Pro-rata by Days, Full First Period, Mid-Month, Half Year], label: Depreciation Start Convention, visible_if: "doc.calculate_depreciation"}
     - {name: depreciation_start_date, type: date, visible_if: "doc.calculate_depreciation", description: "First depreciation date; default the end of the first period (for existing assets: the next depreciation date)"}
     - {name: salvage_value, type: currency, currency: currency, min: "0", default: 0, label: Salvage Value, description: Value expected at the end of its useful life; never depreciated}
@@ -162,7 +166,7 @@
     - {label: Asset, fields: [asset_name, item, asset_category, company, currency, location, custodian, expected_return_date, cost_center, asset_quantity, status]}
     - {label: Identity, fields: [serial_number, manufacturer, model_number, warranty_expiry_date, end_of_life_date]}
     - {label: Purchase, fields: [purchase_date, available_for_use_date, gross_purchase_amount, is_existing_asset, purchase_invoice, opening_accumulated_depreciation, opening_number_of_booked_depreciations]}
-    - {label: Depreciation, fields: [calculate_depreciation, depreciation_method, total_number_of_depreciations, frequency_of_depreciation, rate_of_depreciation, start_convention, depreciation_start_date, salvage_value, schedule]}
+    - {label: Depreciation, fields: [calculate_depreciation, depreciation_method, total_number_of_depreciations, frequency_of_depreciation, rate_of_depreciation, total_estimated_units, usage_unit, start_convention, depreciation_start_date, salvage_value, schedule]}
     - {label: Finance Books, collapsible: true, fields: [finance_books, book_schedule]}
     - {label: Values, fields: [total_asset_cost, additional_asset_cost, value_adjustments, accumulated_depreciation, value_after_depreciation, next_depreciation_date, disposal, disposal_date, split_from]}
     - {label: Verification, fields: [last_verified_date, next_verification_date, verification_result]}
@@ -172,6 +176,18 @@
     - {name: positive_cost, check: "doc.gross_purchase_amount > 0.0", message: "Gross purchase amount must be greater than zero"}
     - {name: available_after_purchase, check: "doc.available_for_use_date == null || doc.purchase_date == null || doc.available_for_use_date >= doc.purchase_date", message: "The available-for-use date cannot be before the purchase date"}
   actions:
+    - name: record_usage
+      label: Record Usage
+      docstatus: [1]
+      permission: write
+      condition: "doc.calculate_depreciation && doc.depreciation_method == 'Units of Production'"
+      params:
+        - {name: period_end, label: Period Ending, type: date, required: true, description: "The last day of the period the units were used in"}
+        - {name: units, label: Units Used, type: data, required: true, description: "A decimal number, 0 or more; 0 takes the period's usage back"}
+      contract:
+        effect: transactional_action
+        returns: {type: object, properties: {schedule_date: {type: string, format: date}, units: {type: string}, depreciation_amount: {type: string}, units_left: {type: string}}}
+        completion: "The asset's plan holds one unbooked row for the period with these units and the depreciation they earn, in each book that depreciates by use; the upkeep books it once its date is due"
     - name: split_asset
       label: Split Asset
       docstatus: [1]

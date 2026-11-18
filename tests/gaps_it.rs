@@ -2,6 +2,7 @@
 //! default `postgres://ferrum:ferrum@localhost:5432/ferrum_assets_gaps_test`). The database is reset
 //! first. One company, then one section per gap, in order; each section's figures are to the cent.
 
+use ferrum_kernel::capability::Invocation;
 use ferrum_kernel::tenant::NewTenant;
 use ferrum_kernel::{Ctx, Db, DbConfig, Doc, Error, HookRegistry, Kernel, KernelSettings, ListQuery};
 use ferrum_meta::Catalog;
@@ -115,6 +116,13 @@ impl T {
         let in_books = rows(&doc, "book_schedule").iter().filter(|r| r["booked"] == json!(true)).count();
         assert_eq!(self.entries(asset).await, (own * (1 + books) + in_books) as i64, "one entry per booked row, never two");
     }
+    async fn user(&self, email: &str, role: &str) -> Ctx {
+        let id = self.k.create_user(&self.admin, email, email, Some("Correct-Horse-9"), &[role.into()], false).await.expect("user");
+        self.k.load_ctx(self.tenant, id, None, "it".into()).await.expect("ctx")
+    }
+    async fn usage(&self, ctx: &Ctx, asset: Uuid, period_end: &str, units: &str) -> Result<Value, Error> {
+        self.k.run_action(ctx, "Asset", asset, "record_usage", json!({"period_end": period_end, "units": units})).await
+    }
     async fn upkeep(&self) {
         ferrum_app_assets::maintenance(&self.k, self.tenant).await.expect("asset upkeep");
     }
@@ -206,6 +214,11 @@ async fn scenario() {
     let mill = a_half_year_book_beside_a_common_one(&t, &s).await;
     a_convention_must_fit_its_periods(&t, &s).await;
     leaving_under_half_year_takes_half_the_year(&t, &s, mill).await;
+    sum_of_years_on_an_asset_and_in_a_book(&t, &s).await;
+    usage_becomes_depreciation(&t, &s).await;
+    let forklift = usage_through_the_gate_repeats_safely(&t, &s).await;
+    who_may_record_usage(&t, forklift, mill).await;
+    a_revaluation_between_usages_is_carried(&t, &s, forklift).await;
 }
 
 /// An asset already in the books, from `json` over the setup's defaults.
@@ -337,4 +350,140 @@ async fn leaving_under_half_year_takes_half_the_year(t: &T, s: &Setup, mill: Uui
             .collect();
     let tb = ferrum_domain::reports::run(&t.k, &t.admin, "trial_balance", &p).await.expect("trial balance");
     assert_eq!(tb["meta"]["balanced"], json!(true), "{}", tb["totals"]);
+}
+
+fn amounts(doc: &Doc, book: Option<Uuid>) -> Vec<Decimal> {
+    plan(doc, book).into_iter().map(|r| r.1).collect()
+}
+
+async fn sum_of_years_on_an_asset_and_in_a_book(t: &T, s: &Setup) {
+    let syd = |extra: Value| {
+        let mut v = asset(
+            s,
+            json!({"asset_name": "Press", "purchase_date": "2021-01-01", "gross_purchase_amount": "15000", "total_number_of_depreciations": 5,
+                                    "start_convention": "Full First Period"}),
+        );
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        v
+    };
+    let own = t.insert("Asset", syd(json!({"depreciation_method": "Sum of Years Digits"}))).await;
+    assert_eq!(amounts(&own, None), [n("5000"), n("4000"), n("3000"), n("2000"), n("1000")]);
+    let beside = t.insert("Asset", syd(json!({"finance_books": [{"finance_book": s.tax.to_string(), "depreciation_method": "Sum of Years Digits"}]}))).await;
+    assert_eq!(amounts(&beside, None), [n("3000"); 5], "straight line in the common books");
+    assert_eq!(amounts(&beside, Some(s.tax)), [n("5000"), n("4000"), n("3000"), n("2000"), n("1000")], "sum of years in the tax book");
+    let odd =
+        t.k.insert(
+            &t.admin,
+            "Asset",
+            obj(syd(json!({"depreciation_method": "Sum of Years Digits", "total_number_of_depreciations": 30, "frequency_of_depreciation": 1}))),
+        )
+        .await;
+    assert!(matches!(odd, Err(ref e) if validation(e, "whole years")), "{odd:?}");
+}
+
+/// A truck of 50,000 with a salvage value of 5,000, expected to run 100,000 km.
+async fn usage_becomes_depreciation(t: &T, s: &Setup) {
+    let truck = t
+        .insert(
+            "Asset",
+            asset(
+                s,
+                json!({"asset_name": "Truck", "purchase_date": "2025-01-01", "gross_purchase_amount": "50000", "salvage_value": "5000",
+                            "depreciation_method": "Units of Production", "total_number_of_depreciations": 60, "frequency_of_depreciation": 1,
+                            "total_estimated_units": "100000", "usage_unit": "km"}),
+            ),
+        )
+        .await;
+    assert!(plan(&truck, None).is_empty(), "nothing is planned ahead");
+    let truck = uid(&truck);
+    t.submit("Asset", truck).await;
+    let a = &t.admin;
+    let first = t.usage(a, truck, "2025-01-31", "2000").await.expect("usage");
+    assert_eq!((dec(&first["depreciation_amount"]), first["units_left"].as_str()), (n("900"), Some("98000")));
+    t.usage(a, truck, "2025-01-31", "2000").await.expect("the same again");
+    assert_eq!(plan(&t.get("Asset", truck).await, None), [("2025-01-31".to_string(), n("900"), false)], "one row for the period");
+    t.usage(a, truck, "2025-01-31", "3000").await.expect("corrected");
+    let x = t.get("Asset", truck).await;
+    assert_eq!(plan(&x, None), [("2025-01-31".to_string(), n("1350"), false)]);
+    assert_eq!(dec(&rows(&x, "schedule")[0]["units"]), n("3000"));
+    t.upkeep().await;
+    assert_eq!(t.entries(truck).await, 1, "booked by exactly one entry");
+    let booked_period = t.usage(a, truck, "2025-01-31", "100").await;
+    assert!(matches!(booked_period, Err(ref e) if validation(e, "booked up to 2025-01-31")), "{booked_period:?}");
+    t.usage(a, truck, "2025-02-28", "500").await.expect("usage");
+    t.usage(a, truck, "2025-02-28", "0").await.expect("taken back");
+    assert_eq!(plan(&t.get("Asset", truck).await, None).len(), 1, "0 units removes the unbooked row");
+    let last = t.usage(a, truck, "2025-03-31", "500000").await.expect("beyond the estimate");
+    assert_eq!(dec(&last["depreciation_amount"]), n("43650"), "the rest, to salvage exactly");
+    t.upkeep().await;
+    let x = t.get("Asset", truck).await;
+    assert_eq!((x["status"].clone(), dec(&x["value_after_depreciation"])), (json!("Fully Depreciated"), n("5000")));
+    t.posted_once(truck).await;
+}
+
+/// A forklift of 10,000 expected to run 1,000 hours, its usage recorded through the gate.
+async fn usage_through_the_gate_repeats_safely(t: &T, s: &Setup) -> Uuid {
+    let forklift = t
+        .insert(
+            "Asset",
+            asset(
+                s,
+                json!({"asset_name": "Forklift", "purchase_date": "2025-01-01", "gross_purchase_amount": "10000", "depreciation_method": "Units of Production",
+                            "total_number_of_depreciations": 60, "frequency_of_depreciation": 1, "total_estimated_units": "1000", "usage_unit": "hours"}),
+            ),
+        )
+        .await;
+    let forklift = uid(&forklift);
+    t.submit("Asset", forklift).await;
+    let call = |units: &str| {
+        Invocation::new("assets.asset.record_usage", json!({"id": forklift.to_string(), "params": {"period_end": "2025-01-31", "units": units}})).key("u1")
+    };
+    let once = t.k.invoke(&t.admin, call("100")).await.expect("usage");
+    assert!(!once.repeated);
+    assert_eq!(dec(&once.result["depreciation_amount"]), n("1000"));
+    let again = t.k.invoke(&t.admin, call("100")).await.expect("repeat");
+    assert!(again.repeated, "the second answer is the first's");
+    assert_eq!(plan(&t.get("Asset", forklift).await, None), [("2025-01-31".to_string(), n("1000"), false)]);
+    let changed = t.k.invoke(&t.admin, call("150")).await;
+    assert!(matches!(changed, Err(Error::Refused { code: "input_changed", .. })), "{changed:?}");
+    forklift
+}
+
+async fn who_may_record_usage(t: &T, forklift: Uuid, straight_line: Uuid) {
+    let user = t.user("user@acme.test", "Asset User").await;
+    let refused = t.usage(&user, forklift, "2025-01-31", "100").await;
+    assert!(matches!(refused, Err(Error::Forbidden(_))), "an Asset User only reads assets: {refused:?}");
+    let future = (chrono::Utc::now().date_naive() + chrono::Duration::days(40)).to_string();
+    let later = t.usage(&t.admin, forklift, &future, "100").await;
+    assert!(matches!(later, Err(ref e) if validation(e, "today or before")), "{later:?}");
+    let not_offered = t.usage(&t.admin, straight_line, "2025-01-31", "100").await;
+    assert!(matches!(not_offered, Err(ref e) if validation(e, "not available")), "{not_offered:?}");
+}
+
+/// The forklift's value is halved between two usages: the planned row halves and keeps its units.
+async fn a_revaluation_between_usages_is_carried(t: &T, s: &Setup, forklift: Uuid) {
+    t.upkeep().await;
+    t.usage(&t.admin, forklift, "2025-03-31", "200").await.expect("usage");
+    let x = t.get("Asset", forklift).await;
+    assert_eq!(plan(&x, None).last().map(|r| (r.1, r.2)), Some((n("2000"), false)), "9,000 left over 900 hours");
+    let expenses = t.find_one("Account", json!({"account_name": "Administrative Expenses", "company": s.company.to_string()})).await;
+    let adjust = t
+        .insert(
+            "AssetValueAdjustment",
+            json!({"asset": forklift.to_string(), "adjustment_date": "2025-02-28", "new_asset_value": "4500", "difference_account": expenses["id"]}),
+        )
+        .await;
+    t.submit("AssetValueAdjustment", uid(&adjust)).await;
+    let x = t.get("Asset", forklift).await;
+    let row = rows(&x, "schedule").into_iter().last().unwrap();
+    assert_eq!((dec(&row["depreciation_amount"]), dec(&row["units"]), row["booked"].clone()), (n("1000"), n("200"), json!(false)));
+    t.usage(&t.admin, forklift, "2025-04-30", "10000").await.expect("the rest");
+    let x = t.get("Asset", forklift).await;
+    assert_eq!(unbooked(&x, None), dec(&x["value_after_depreciation"]), "the plan still ends at salvage");
+    t.upkeep().await;
+    let x = t.get("Asset", forklift).await;
+    assert_eq!((x["status"].clone(), dec(&x["value_after_depreciation"])), (json!("Fully Depreciated"), n("0")));
+    t.posted_once(forklift).await;
 }

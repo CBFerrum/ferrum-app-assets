@@ -16,6 +16,10 @@ pub enum Method {
     StraightLine,
     WrittenDownValue,
     DoubleDecliningBalance,
+    /// Each year's share of the digits of the years left (5, 4, 3, 2, 1 of 15 over five years).
+    SumOfYearsDigits,
+    /// By units used in a period, recorded as they are known (`record_usage`): nothing is planned ahead.
+    UnitsOfProduction,
     /// The user enters the schedule.
     Manual,
 }
@@ -26,6 +30,8 @@ impl Method {
             "Straight Line" => Method::StraightLine,
             "Written Down Value" => Method::WrittenDownValue,
             "Double Declining Balance" => Method::DoubleDecliningBalance,
+            "Sum of Years Digits" => Method::SumOfYearsDigits,
+            "Units of Production" => Method::UnitsOfProduction,
             "Manual" => Method::Manual,
             _ => return None,
         })
@@ -76,11 +82,13 @@ pub struct Plan {
     pub precision: u32,
 }
 
-/// One period of a plan: its depreciation date and its share of a full period.
+/// One period of a plan: its depreciation date, its share of a full period and its place in the
+/// whole plan (periods behind an existing asset counted; the extra last period is `periods`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Slot {
     pub date: NaiveDate,
     pub weight: Decimal,
+    pub index: u32,
 }
 
 /// Half away from zero, at exactly `p` places (the platform's money rounding).
@@ -147,17 +155,34 @@ impl Plan {
     /// Every period still to depreciate, in date order.
     pub fn slots(&self) -> Vec<Slot> {
         let remaining = self.periods.saturating_sub(self.opening_booked);
-        if self.method == Method::Manual || remaining == 0 {
+        if self.by_hand() || remaining == 0 {
             return vec![];
         }
         let date = |k: u32| add_months(self.start, (k * self.frequency) as i32);
-        let mut out: Vec<Slot> = (0..remaining).map(|k| Slot { date: date(k), weight: Decimal::ONE }).collect();
+        let mut out: Vec<Slot> = (0..remaining).map(|k| Slot { date: date(k), weight: Decimal::ONE, index: self.opening_booked + k }).collect();
         let share = self.first_share();
         if share < Decimal::ONE {
             out[0].weight = share;
-            out.push(Slot { date: date(remaining), weight: Decimal::ONE - share });
+            out.push(Slot { date: date(remaining), weight: Decimal::ONE - share, index: self.periods });
         }
         out
+    }
+
+    /// Rows that are entered, by hand or from usage, rather than planned ahead.
+    pub fn by_hand(&self) -> bool {
+        matches!(self.method, Method::Manual | Method::UnitsOfProduction)
+    }
+
+    /// Sum of years: a slot's weight, the digit of the year it falls in (the years left, counting
+    /// it), a part period taking its share of its own year's digit and the rest of the year before's.
+    fn digits(&self, slot: &Slot) -> Decimal {
+        let years = self.periods * self.frequency / 12;
+        let digit = |i: Option<u32>| match i {
+            Some(i) if i < self.periods => Decimal::from(years.saturating_sub(i * self.frequency / 12)),
+            _ => Decimal::ZERO,
+        };
+        let share = self.first_share();
+        share * digit(Some(slot.index)) + (Decimal::ONE - share) * digit(slot.index.checked_sub(1))
     }
 
     /// Declining methods' rate per period: the annual rate pro rata for written down value,
@@ -176,7 +201,8 @@ impl Plan {
         let amounts = match self.method {
             Method::StraightLine => spread(value - self.salvage, &slots.iter().map(|s| s.weight).collect::<Vec<_>>(), self.precision),
             Method::WrittenDownValue | Method::DoubleDecliningBalance => declining(value, self.salvage, slots, self.period_rate(), self.precision),
-            Method::Manual => vec![],
+            Method::SumOfYearsDigits => spread(value - self.salvage, &slots.iter().map(|s| self.digits(s)).collect::<Vec<_>>(), self.precision),
+            Method::Manual | Method::UnitsOfProduction => vec![],
         };
         slots.iter().zip(amounts).filter(|(_, a)| *a > Decimal::ZERO).map(|(s, a)| (s.date, a)).collect()
     }
@@ -186,7 +212,7 @@ impl Plan {
     pub fn period_start(&self, end: NaiveDate, previous: Option<NaiveDate>) -> NaiveDate {
         match previous {
             Some(p) => p,
-            None if self.method == Method::Manual || (self.convention == Convention::ProRataDays && self.opening_booked == 0) => {
+            None if self.by_hand() || (self.convention == Convention::ProRataDays && self.opening_booked == 0) => {
                 (self.available_for_use - Duration::days(1)).min(end)
             }
             None => add_months(end, -(self.frequency as i32)),
@@ -199,7 +225,7 @@ impl Plan {
     /// the asset is in use for in it (the part period at the end of the plan).
     pub fn leaving_amount(&self, amount: Decimal, end: NaiveDate, previous: Option<NaiveDate>, on: NaiveDate) -> Decimal {
         let u = match self.convention {
-            Convention::Mid(u) if self.method != Method::Manual => u,
+            Convention::Mid(u) if !self.by_hand() => u,
             _ => return partial(amount, self.period_start(end, previous), end, on, self.precision),
         };
         let n = self.blocks(u);
@@ -492,6 +518,45 @@ mod tests {
         let full = Plan { convention: Convention::FullFirstPeriod, ..days };
         let on = d(2023, 3, 15);
         assert_eq!(full.leaving_amount(n("100"), d(2023, 3, 31), Some(d(2023, 2, 28)), on), partial(n("100"), d(2023, 2, 28), d(2023, 3, 31), on, 2));
+    }
+
+    #[test]
+    fn sum_of_years_digits() {
+        let p = plan(Method::SumOfYearsDigits, 5, 12, d(2021, 1, 1), d(2021, 12, 31));
+        assert_eq!(amounts(&p, "15000"), ["5000.00", "4000.00", "3000.00", "2000.00", "1000.00"]);
+    }
+
+    #[test]
+    fn sum_of_years_with_a_half_first_period() {
+        let p = Plan { method: Method::SumOfYearsDigits, ..mid(12, 5, 12, d(2021, 3, 10), d(2021, 12, 31)) };
+        assert_eq!(amounts(&p, "15000"), ["2500.00", "4500.00", "3500.00", "2500.00", "1500.00", "500.00"]);
+    }
+
+    #[test]
+    fn sum_of_years_replans_by_the_digits_left() {
+        let p = plan(Method::SumOfYearsDigits, 5, 12, d(2021, 1, 1), d(2021, 12, 31));
+        let left: Vec<Slot> = p.slots().into_iter().skip(2).collect();
+        assert_eq!(left.iter().map(|s| s.index).collect::<Vec<_>>(), [2, 3, 4]);
+        let rows: Vec<String> = p.amounts(&left, n("6000")).iter().map(|(_, a)| a.to_string()).collect();
+        assert_eq!(rows, ["3000.00", "2000.00", "1000.00"]);
+        let existing = Plan { opening_booked: 2, start: d(2023, 12, 31), ..p };
+        assert_eq!(amounts(&existing, "6000"), ["3000.00", "2000.00", "1000.00"], "an existing asset's periods behind it count");
+    }
+
+    #[test]
+    fn sum_of_years_in_monthly_periods() {
+        let p = Plan { convention: Convention::FullFirstPeriod, ..plan(Method::SumOfYearsDigits, 24, 1, d(2021, 1, 1), d(2021, 1, 31)) };
+        let rows = amounts(&p, "3600");
+        assert_eq!(rows.len(), 24);
+        assert!(rows[..12].iter().all(|a| a == "200.00") && rows[12..].iter().all(|a| a == "100.00"), "{rows:?}");
+    }
+
+    #[test]
+    fn units_of_production_plans_nothing_ahead() {
+        let p = plan(Method::UnitsOfProduction, 60, 1, d(2025, 1, 1), d(2025, 1, 31));
+        assert!(p.slots().is_empty());
+        assert_eq!(p.period_start(d(2025, 1, 31), None), d(2024, 12, 31), "a usage row is cut by days from the day it came into use");
+        assert_eq!(p.leaving_amount(n("100"), d(2025, 1, 31), None, d(2025, 1, 16)), partial(n("100"), d(2024, 12, 31), d(2025, 1, 31), d(2025, 1, 16), 2));
     }
 
     #[test]

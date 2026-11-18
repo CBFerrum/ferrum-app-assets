@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0
+
+Needs the same platform as 0.6.0. Package `assets` 0.4.0: new fields, no new table, no data to move.
+
+- **Sum of Years Digits.** An asset, a category or a finance book can depreciate each year by its share of the
+  digits of the years left (5, 4, 3, 2, 1 of 15 over five years), with the start conventions, and re-planned by the
+  digits left after a value change. A life that is not whole years is refused.
+- **Units of Production.** An asset worn by use (Total Estimated Units, Unit of Use) plans nothing ahead. The new
+  operation `assets.asset.record_usage` (Record Usage, `write` on Asset) sets the units used in a period ending on
+  a day up to today: each book that depreciates by use gets one unbooked row of what is left to depreciate times the
+  units over the units left, so the last usage takes the plan exactly to salvage. A repeat replaces the period's row,
+  0 units takes it back, a booked period is refused. A value adjustment rescales the planned rows, which keep their
+  units; a split divides the estimate and each row's units.
+
 ## 0.6.0
 
 Needs the same platform as 0.5.0. Package `assets` 0.3.0: one new field, no new table, no data to move.
