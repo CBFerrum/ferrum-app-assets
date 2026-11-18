@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0
+
+Needs the same platform as 0.7.0. Package `assets` 0.5.0: two new tables (`DepreciationTable` and its rows) and new
+fields; no data to move. New add-on `assets-us` 0.1.0 (package `assets_us`, data only).
+
+- **Depreciation by a table.** A Depreciation Table record gives the percent of what is depreciable for each year of
+  life; its percents total 100 and its years run 1, 2, 3 … without a gap. An asset, a category or a finance book can
+  depreciate by Table: the percents are copied onto the asset while it is a draft (an edited table moves no
+  submitted plan), the life is the table's number of years, periods must be yearly, and the table carries its own
+  convention. Asset Managers keep tables; Asset Users and Accounts Managers read them.
+- **The United States' half-year tables as records.** The add-on `assets-us` seeds the six tables of IRS
+  Publication 946 (2025), Appendix A, Table A-1, each percent with its source beside it, read on 18 November 2026.
+  It is installable once the platform lists `US_TABLES_MANIFEST` beside the app's manifest.
+
 ## 0.7.0
 
 Needs the same platform as 0.6.0. Package `assets` 0.4.0: new fields, no new table, no data to move.

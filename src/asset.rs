@@ -68,6 +68,19 @@ pub(crate) fn plan_of(doc: &Doc, precision: u32) -> std::result::Result<Plan, Ve
     if method == Some(Method::SumOfYearsDigits) && periods >= 1 && frequency >= 1 && (periods * frequency) % 12 != 0 {
         errors.push(FieldError::new("total_number_of_depreciations", "sum of years needs a useful life of whole years"));
     }
+    let table: Vec<Decimal> = doc
+        .get("table_percents")
+        .and_then(Value::as_array)
+        .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_string).or_else(|| v.as_f64().map(|f| f.to_string()))?.parse().ok()).collect())
+        .unwrap_or_default();
+    if method == Some(Method::Table) {
+        if table.is_empty() {
+            errors.push(FieldError::new("depreciation_table", "is required for the table method"));
+        }
+        if frequency >= 1 && frequency != 12 {
+            errors.push(FieldError::new("frequency_of_depreciation", "a table gives a percent a year: use yearly periods"));
+        }
+    }
     let convention = Convention::parse(s(doc, "start_convention"));
     if convention == Convention::Mid(12) && frequency >= 1 && frequency % 12 != 0 {
         errors.push(FieldError::new("start_convention", "Half Year needs depreciation periods of whole years"));
@@ -88,6 +101,7 @@ pub(crate) fn plan_of(doc: &Doc, precision: u32) -> std::result::Result<Plan, Ve
         opening_booked: opening_booked as u32,
         salvage: d(doc, "salvage_value"),
         precision,
+        table,
     })
 }
 
@@ -116,6 +130,8 @@ const BOOK_FIELDS: &[&str] = &[
     "opening_number_of_booked_depreciations",
     "depreciation_start_date",
     "start_convention",
+    "depreciation_table",
+    "table_percents",
 ];
 
 /// The asset as `book` sees it: the book's settings in place of the asset's.
@@ -563,10 +579,10 @@ pub(crate) fn extend_life(doc: &mut Doc, months: i64) -> Result<()> {
     if months == 0 {
         return Ok(());
     }
-    if !b(doc, "calculate_depreciation") || matches!(s(doc, "depreciation_method"), Some("Manual" | "Units of Production")) {
+    if !b(doc, "calculate_depreciation") || matches!(s(doc, "depreciation_method"), Some("Manual" | "Units of Production" | "Table")) {
         return Err(Error::field(
             "increase_in_asset_life",
-            "only a generated depreciation plan is extended (a manual schedule is changed by hand, units of production by the estimate)",
+            "only a generated depreciation plan is extended (a manual schedule is changed by hand, units of production by the estimate, a table by its years)",
         ));
     }
     let mut lives = Vec::new();
@@ -870,6 +886,14 @@ pub(crate) async fn restore_after_disposal(k: &Kernel, ctx: &Ctx, tx: &mut Tx, d
     Ok(())
 }
 
+/// A depreciation table's percents in year order, and its number of years.
+async fn table_percents(hc: &mut HookCtx<'_>, table: Uuid) -> Result<(Value, usize)> {
+    let t = get(hc.kernel, hc.ctx, hc.tx, "DepreciationTable", table).await?;
+    let mut list: Vec<(i64, Decimal)> = rows(&t, "rows").iter().map(|r| (int(r, "year"), d(r, "percent"))).collect();
+    list.sort_by_key(|r| r.0);
+    Ok((Value::Array(list.iter().map(|r| json!(r.1.normalize().to_string())).collect()), list.len()))
+}
+
 /// Fills what the user left empty: name and category from the item, depreciation settings from
 /// the category, the available-for-use and first depreciation dates, the cost center.
 async fn defaults(hc: &mut HookCtx<'_>, doc: &mut Doc) -> Result<()> {
@@ -888,11 +912,40 @@ async fn defaults(hc: &mut HookCtx<'_>, doc: &mut Doc) -> Result<()> {
         && let Some(cat) = id(doc, "asset_category")
     {
         let c = get(hc.kernel, hc.ctx, hc.tx, "AssetCategory", cat).await?;
-        for f in ["depreciation_method", "total_number_of_depreciations", "frequency_of_depreciation", "rate_of_depreciation", "start_convention"] {
+        for f in [
+            "depreciation_method",
+            "total_number_of_depreciations",
+            "frequency_of_depreciation",
+            "rate_of_depreciation",
+            "start_convention",
+            "depreciation_table",
+        ] {
             if doc.get(f).is_none_or(Value::is_null) {
                 set(doc, f, c.get(f).cloned().unwrap_or(Value::Null));
             }
         }
+    }
+    // A table's percents are copied while the asset is a draft: one edited later moves no submitted plan.
+    if b(doc, "calculate_depreciation") {
+        if s(doc, "depreciation_method") == Some("Table")
+            && let Some(t) = id(doc, "depreciation_table")
+        {
+            let (percents, years) = table_percents(hc, t).await?;
+            set(doc, "table_percents", percents);
+            set(doc, "total_number_of_depreciations", years);
+        }
+        let mut list = rows(doc, "finance_books");
+        for r in list.iter_mut() {
+            let seen = as_in(doc, id(r, "finance_book"));
+            if s(&seen, "depreciation_method") == Some("Table")
+                && let Some(t) = id(&seen, "depreciation_table")
+            {
+                let (percents, years) = table_percents(hc, t).await?;
+                set(r, "table_percents", percents);
+                set(r, "total_number_of_depreciations", years);
+            }
+        }
+        set(doc, "finance_books", Value::Array(list.into_iter().map(Value::Object).collect()));
     }
     if s(doc, "available_for_use_date").is_none() {
         set(doc, "available_for_use_date", doc.get("purchase_date").cloned().unwrap_or(Value::Null));

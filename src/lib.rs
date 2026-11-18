@@ -34,6 +34,7 @@ pub fn register(h: &mut HookRegistry) {
     h.register("Company", Arc::new(setup::CompanyHook))
         .register("Item", Arc::new(setup::ItemHook))
         .register("AssetCategory", Arc::new(setup::CategoryHook))
+        .register("DepreciationTable", Arc::new(setup::TableHook))
         .register("Location", Arc::new(setup::LocationHook))
         .register("Asset", Arc::new(asset::AssetHook))
         .register("PurchaseInvoice", Arc::new(purchase::PurchaseInvoiceHook))
@@ -52,6 +53,10 @@ pub fn register(h: &mut HookRegistry) {
 /// The manifest of the connector app with Operations (`connectors/ops/app.yaml`): its package is
 /// `assets_ops`, its code this crate's. It ships with Assets.
 pub const CONNECTOR_MANIFEST: &str = include_str!("../connectors/ops/app.yaml");
+
+/// The manifest of the add-on with one country's depreciation tables as records (`addons/us/app.yaml`):
+/// a data-only package, `assets_us`, listed by the platform beside the app.
+pub const US_TABLES_MANIFEST: &str = include_str!("../addons/us/app.yaml");
 
 /// This package's reports.
 pub fn reports() -> Vec<Arc<dyn ReportSource>> {
@@ -103,7 +108,14 @@ pub fn packages() -> std::result::Result<Vec<ferrum_meta::Package>, ferrum_meta:
 
 #[cfg(test)]
 mod tests {
-    use super::{MANIFEST, UI};
+    use super::{MANIFEST, UI, US_TABLES_MANIFEST};
+
+    #[test]
+    fn the_tables_add_on_is_a_manifest_the_platform_takes() {
+        let m = ferrum_apps::AppManifest::parse(US_TABLES_MANIFEST).expect("addons/us/app.yaml");
+        assert_eq!((m.packages.clone(), m.parent.as_deref()), (vec!["assets_us".to_string()], Some("assets")));
+        assert!(super::packages().expect("app packages").iter().any(|p| p.name() == "assets_us"), "the package ships in the crate");
+    }
 
     #[test]
     fn packages_form_a_valid_catalog_with_the_platform() {

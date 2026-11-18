@@ -7,7 +7,7 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-0.7.0-475569?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.0-475569?style=flat-square)](CHANGELOG.md)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Ferrum platform](https://img.shields.io/badge/runs%20on-Ferrum-2f5bea?style=flat-square)](https://github.com/CBFerrum/Ferrum)
 ![Rust](https://img.shields.io/badge/Rust-server-b7410e?style=flat-square&logo=rust)
@@ -48,13 +48,13 @@ the same books as Ferrum ERP.
 
 | | |
 |---|---|
-| 📦 **Version** | `0.7.0`; the Equipment Maintenance connector `0.1.0` |
+| 📦 **Version** | `0.8.0`; the Equipment Maintenance connector `0.1.0`; the United States depreciation tables `0.1.0` |
 | 🖥️ **Kind** | Own interface at `/assets/` (overview, an asset's page, verifying a room); every other record in Ferrum's records frame |
-| 🧱 **What it adds** | 2 packages; 16 entities and 7 line tables; 5 roles of its own (2 in Assets, 3 in Equipment Maintenance) and read access for ERP's Accounts Manager; 5 reports; 2 menus; fields on Company, Item, Account, purchase and sales invoice lines and journal entries |
+| 🧱 **What it adds** | 3 packages; 17 entities and 8 line tables; 5 roles of its own (2 in Assets, 3 in Equipment Maintenance) and read access for ERP's Accounts Manager; 5 reports; 2 menus; fields on Company, Item, Account, purchase and sales invoice lines and journal entries |
 | 🔗 **Depends on** | Ferrum platform `>=0.4.0, <0.5` and ERP `>=0.1`; the connector also needs Assets `>=0.2` and Operations `>=0.1` |
 | 🤝 **Works with** | ERP (accounts, purchase and sales invoices, stock, finance books, cost centres); Operations (devices and their readings) |
 | 🗣️ **Languages** | English, Arabic and Hindi; pages mirror right to left |
-| 🧪 **Tests** | 29 Rust tests (3 suites against a real PostgreSQL), 59 interface tests |
+| 🧪 **Tests** | 33 Rust tests (3 suites against a real PostgreSQL), 59 interface tests |
 | 📄 **Licence** | AGPL-3.0-only |
 
 ## 📸 Screenshots
@@ -156,7 +156,16 @@ the same books as Ferrum ERP.
 ### 🧮 Depreciation
 
 - **Methods**: straight line, written down value, double declining balance, sum of years digits (a finance book
-  can use it too), units of production, and manual (you enter the schedule).
+  can use it too), units of production, by a table, and manual (you enter the schedule).
+- **Depreciation tables**: a Depreciation Table record gives the percent of what is depreciable for each year of
+  life (the percents total 100, the years run without a gap). An asset, a category or a finance book can
+  depreciate by one: the table's percents are copied while the asset is a draft, so a table edited later moves no
+  submitted plan. A table carries its own convention (a half-year table has one row more than the life), needs
+  yearly periods, and its number of years is the life.
+- **The United States depreciation tables** (add-on `assets-us`, package `assets_us`, data only): the six half-year
+  tables of IRS Publication 946, Table A-1, as Depreciation Table records a tax book can use, each percent with its
+  source beside it. Another country's tables are added the same way, as records, without code. It is installable
+  from the store once the platform lists its manifest beside the app's; until then it is loaded by the app's tests.
 - **Units of production**: nothing is planned ahead. **Record Usage** (`assets.asset.record_usage`, for a person or
   an agent) sets the units used in a period, and the period's depreciation is what is left to depreciate times the
   units over the units left of the estimate, so the last usage takes it exactly to salvage. A repeat replaces the
@@ -314,7 +323,8 @@ installed.
 
 | Entity | What it is | Key fields or states |
 |---|---|---|
-| Asset Category | Defaults shared by similar assets | method, life, frequency, rate, convention, verify every, CWIP, group assets, accounts per company |
+| Asset Category | Defaults shared by similar assets | method, life, frequency, rate, table, convention, verify every, CWIP, group assets, accounts per company |
+| Depreciation Table | The percent of what is depreciable for each year | years, percents (total 100) |
 | Location | A place in a tree | parent, group |
 | Asset | One asset or a group of identical ones | Draft, Submitted, Partially Depreciated, Fully Depreciated, In Maintenance, Out of Order, Sold, Scrapped, Cancelled |
 | Asset Movement | Custody and place changes | Transfer, Issue, Receipt |
@@ -367,7 +377,7 @@ Fixed Assets, Odoo (Assets and Maintenance) and ERPNext, the usual choices for a
 | Register with categories, locations and custodians | ✅ | ✅ | ✅ | ✅ | 🟡 | ✅ |
 | Straight line and declining balance | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Sum-of-years and units of production | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Tax depreciation tables (MACRS and the like) | ❌ | ✅ | ✅ | ✅ | ❌ | 🟡 |
+| Tax depreciation tables (MACRS and the like) | ✅ | ✅ | ✅ | ✅ | ❌ | 🟡 |
 | Several books, each with its own schedule | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
 | Half-year and mid-month conventions | ✅ ¹ | ✅ | ✅ | ✅ | 🟡 | 🟡 |
 | Depreciation posted to the ledger by itself | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ |
@@ -407,7 +417,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 
 ### 🚧 Where the leaders are still ahead
 
-- 🧮 Tax depreciation tables (MACRS and the like).
+- 🧮 Mid-quarter and mid-month tax tables, and other countries' tables (records, no code needed).
 - 📄 Lease accounting under IFRS 16 and ASC 842.
 - 🏢 Partial disposal, transfer between companies and composite assets from several invoices.
 - 🛠️ Full maintenance work orders with labour, spare parts and downtime.
@@ -419,6 +429,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 
 ### ✅ Recently shipped
 
+- [x] **0.8.0** Depreciation by a table, and the United States' half-year tables as records.
 - [x] **0.7.0** Sum of years digits and units of production, with Record Usage.
 - [x] **0.6.0** Mid-month and half-year conventions, at the start and at disposal; the register counts a repair's parts; a split leaves each plan exact.
 - [x] **0.5.0**: Upkeep runs one workspace at a time, on whichever replica is free.
@@ -434,7 +445,7 @@ repairs, without planned labour, reserved spares or downtime taken off a worksta
 ### 🔜 Next up
 
 **Depreciation**
-- [ ] Country tax depreciation (US MACRS, India's block of assets) as finance books.
+- [ ] More countries' tax depreciation tables (India's block of assets and others) as records.
 
 **The asset's life**
 - [ ] One asset capitalised from several invoices or from stock.

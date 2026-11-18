@@ -172,7 +172,7 @@ async fn scenario() {
             admin_email: "admin@acme.test".into(),
             admin_password: "Correct-Horse-9".into(),
             admin_name: None,
-            packages: vec!["assets".into()],
+            packages: vec!["assets".into(), "assets_us".into()],
             settings: Some(json!({"fiscal_year_start_month": 4})),
         })
         .await
@@ -219,6 +219,12 @@ async fn scenario() {
     let forklift = usage_through_the_gate_repeats_safely(&t, &s).await;
     who_may_record_usage(&t, forklift, mill).await;
     a_revaluation_between_usages_is_carried(&t, &s, forklift).await;
+    the_seeded_tables_total_100(&t).await;
+    a_tax_book_depreciates_by_a_table(&t, &s).await;
+    a_table_changed_later_leaves_a_submitted_asset_alone(&t, &s).await;
+    a_table_must_total_100_and_run_without_gaps(&t).await;
+    an_asset_user_cannot_make_a_table(&t).await;
+    a_table_needs_yearly_periods(&t, &s).await;
 }
 
 /// An asset already in the books, from `json` over the setup's defaults.
@@ -486,4 +492,112 @@ async fn a_revaluation_between_usages_is_carried(t: &T, s: &Setup, forklift: Uui
     let x = t.get("Asset", forklift).await;
     assert_eq!((x["status"].clone(), dec(&x["value_after_depreciation"])), (json!("Fully Depreciated"), n("0")));
     t.posted_once(forklift).await;
+}
+
+fn years(table: &Doc) -> Vec<(i64, Decimal)> {
+    let mut v: Vec<(i64, Decimal)> = rows(table, "rows").iter().map(|r| (r["year"].as_i64().unwrap(), dec(&r["percent"]))).collect();
+    v.sort_by_key(|r| r.0);
+    v
+}
+
+async fn the_seeded_tables_total_100(t: &T) {
+    let tables = t.list("DepreciationTable", &json!({})).await;
+    assert_eq!(tables.len(), 6, "{tables:?}");
+    for table in &tables {
+        let full = t.get("DepreciationTable", uid(table)).await;
+        assert_eq!(dec(&full["total_percent"]), n("100"), "{}", full["table_name"]);
+        let y = years(&full);
+        assert!(y.iter().enumerate().all(|(i, r)| r.0 == i as i64 + 1), "{}: {y:?}", full["table_name"]);
+    }
+    let five = t.find_one("DepreciationTable", json!({"table_name": "US GDS 5-year, half-year"})).await;
+    let five = t.get("DepreciationTable", uid(&five)).await;
+    assert_eq!(years(&five).len(), 6, "a five-year life in six rows: the half year is in the table");
+}
+
+async fn table_id(t: &T, name: &str) -> String {
+    t.find_one("DepreciationTable", json!({"table_name": name})).await["id"].as_str().unwrap().to_string()
+}
+
+/// A lathe of 10,000: straight line over five years in the common books, the five-year table in the tax book.
+async fn a_tax_book_depreciates_by_a_table(t: &T, s: &Setup) {
+    let five = table_id(t, "US GDS 5-year, half-year").await;
+    let lathe = t
+        .insert(
+            "Asset",
+            asset(
+                s,
+                json!({"asset_name": "Lathe", "purchase_date": "2019-06-01", "gross_purchase_amount": "10000", "total_number_of_depreciations": 5,
+                            "start_convention": "Full First Period",
+                            "finance_books": [{"finance_book": s.tax.to_string(), "depreciation_method": "Table", "depreciation_table": five,
+                                               "depreciation_start_date": "2019-12-31"}]}),
+            ),
+        )
+        .await;
+    assert_eq!(amounts(&lathe, None), [n("2000"); 5]);
+    assert_eq!(amounts(&lathe, Some(s.tax)), [n("2000"), n("3200"), n("1920"), n("1152"), n("1152"), n("576")]);
+    assert_eq!(rows(&lathe, "finance_books")[0]["total_number_of_depreciations"], json!(6), "the life is the table's");
+    let lathe = uid(&lathe);
+    t.submit("Asset", lathe).await;
+    t.upkeep().await;
+    t.upkeep().await;
+    let x = t.get("Asset", lathe).await;
+    assert_eq!(booked(&x, Some(s.tax)).len(), 6, "every year of the table booked");
+    assert_eq!(dec(&rows(&x, "finance_books")[0]["value_after_depreciation"]), n("0"));
+    t.posted_once(lathe).await;
+}
+
+async fn a_table_changed_later_leaves_a_submitted_asset_alone(t: &T, s: &Setup) {
+    let made = t.insert("DepreciationTable", json!({"table_name": "Two years", "rows": [{"year": 1, "percent": "60"}, {"year": 2, "percent": "40"}]})).await;
+    let table = uid(&made);
+    let by_table = |name: &str| {
+        asset(
+            s,
+            json!({"asset_name": name, "purchase_date": "2024-01-01", "gross_purchase_amount": "1000", "depreciation_method": "Table",
+                        "depreciation_table": table.to_string(), "start_convention": "Full First Period"}),
+        )
+    };
+    let kept = t.insert("Asset", by_table("Kept")).await;
+    assert_eq!(amounts(&kept, None), [n("600"), n("400")]);
+    let kept = uid(&kept);
+    t.submit("Asset", kept).await;
+    let draft = uid(&t.insert("Asset", by_table("Draft")).await);
+    t.k.update(&t.admin, "DepreciationTable", table, obj(json!({"rows": [{"year": 1, "percent": "50"}, {"year": 2, "percent": "50"}]})), None)
+        .await
+        .expect("the table changes");
+    assert_eq!(amounts(&t.get("Asset", kept).await, None), [n("600"), n("400")], "the submitted plan stays");
+    let again = t.k.update(&t.admin, "Asset", draft, obj(json!({"asset_name": "Draft again"})), None).await.expect("save the draft");
+    assert_eq!(amounts(&again, None), [n("500"), n("500")], "a draft takes the table as it is now");
+}
+
+async fn a_table_must_total_100_and_run_without_gaps(t: &T) {
+    let short =
+        t.k.insert(&t.admin, "DepreciationTable", obj(json!({"table_name": "Short", "rows": [{"year": 1, "percent": "50"}, {"year": 2, "percent": "40"}]})))
+            .await;
+    assert!(matches!(short, Err(ref e) if validation(e, "total 100")), "{short:?}");
+    let gap =
+        t.k.insert(&t.admin, "DepreciationTable", obj(json!({"table_name": "Gap", "rows": [{"year": 1, "percent": "50"}, {"year": 3, "percent": "50"}]})))
+            .await;
+    assert!(matches!(gap, Err(ref e) if validation(e, "without a gap")), "{gap:?}");
+}
+
+async fn an_asset_user_cannot_make_a_table(t: &T) {
+    let user = t.user("tables@acme.test", "Asset User").await;
+    let made = t.k.insert(&user, "DepreciationTable", obj(json!({"table_name": "Mine", "rows": [{"year": 1, "percent": "100"}]}))).await;
+    assert!(matches!(made, Err(Error::Forbidden(_))), "{made:?}");
+}
+
+async fn a_table_needs_yearly_periods(t: &T, s: &Setup) {
+    let five = table_id(t, "US GDS 5-year, half-year").await;
+    let monthly =
+        t.k.insert(
+            &t.admin,
+            "Asset",
+            obj(asset(
+                s,
+                json!({"asset_name": "Monthly", "purchase_date": "2024-01-01", "gross_purchase_amount": "1000", "depreciation_method": "Table",
+                                "depreciation_table": five, "frequency_of_depreciation": 1}),
+            )),
+        )
+        .await;
+    assert!(matches!(monthly, Err(ref e) if validation(e, "frequency_of_depreciation") && validation(e, "yearly periods")), "{monthly:?}");
 }

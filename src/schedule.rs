@@ -20,6 +20,8 @@ pub enum Method {
     SumOfYearsDigits,
     /// By units used in a period, recorded as they are known (`record_usage`): nothing is planned ahead.
     UnitsOfProduction,
+    /// Each year the percent of what is depreciable that a table gives (`Plan::table`).
+    Table,
     /// The user enters the schedule.
     Manual,
 }
@@ -32,6 +34,7 @@ impl Method {
             "Double Declining Balance" => Method::DoubleDecliningBalance,
             "Sum of Years Digits" => Method::SumOfYearsDigits,
             "Units of Production" => Method::UnitsOfProduction,
+            "Table" => Method::Table,
             "Manual" => Method::Manual,
             _ => return None,
         })
@@ -80,6 +83,8 @@ pub struct Plan {
     pub opening_booked: u32,
     pub salvage: Decimal,
     pub precision: u32,
+    /// The Table method's percents, year 1 first.
+    pub table: Vec<Decimal>,
 }
 
 /// One period of a plan: its depreciation date, its share of a full period and its place in the
@@ -128,7 +133,7 @@ impl Plan {
         if self.opening_booked > 0 {
             return Decimal::ONE;
         }
-        match self.convention {
+        match self.convention() {
             Convention::FullFirstPeriod => Decimal::ONE,
             Convention::ProRataDays => {
                 let full = (self.start - add_months(self.start, -(self.frequency as i32))).num_days();
@@ -168,6 +173,12 @@ impl Plan {
         out
     }
 
+    /// The convention in force: a table carries its own (a half-year table has one more row than
+    /// the life), so the Table method counts every period in full.
+    pub fn convention(&self) -> Convention {
+        if self.method == Method::Table { Convention::FullFirstPeriod } else { self.convention }
+    }
+
     /// Rows that are entered, by hand or from usage, rather than planned ahead.
     pub fn by_hand(&self) -> bool {
         matches!(self.method, Method::Manual | Method::UnitsOfProduction)
@@ -201,6 +212,11 @@ impl Plan {
         let amounts = match self.method {
             Method::StraightLine => spread(value - self.salvage, &slots.iter().map(|s| s.weight).collect::<Vec<_>>(), self.precision),
             Method::WrittenDownValue | Method::DoubleDecliningBalance => declining(value, self.salvage, slots, self.period_rate(), self.precision),
+            Method::Table => spread(
+                value - self.salvage,
+                &slots.iter().map(|s| self.table.get(s.index as usize).copied().unwrap_or_default()).collect::<Vec<_>>(),
+                self.precision,
+            ),
             Method::SumOfYearsDigits => spread(value - self.salvage, &slots.iter().map(|s| self.digits(s)).collect::<Vec<_>>(), self.precision),
             Method::Manual | Method::UnitsOfProduction => vec![],
         };
@@ -212,7 +228,7 @@ impl Plan {
     pub fn period_start(&self, end: NaiveDate, previous: Option<NaiveDate>) -> NaiveDate {
         match previous {
             Some(p) => p,
-            None if self.by_hand() || (self.convention == Convention::ProRataDays && self.opening_booked == 0) => {
+            None if self.by_hand() || (self.convention() == Convention::ProRataDays && self.opening_booked == 0) => {
                 (self.available_for_use - Duration::days(1)).min(end)
             }
             None => add_months(end, -(self.frequency as i32)),
@@ -224,7 +240,7 @@ impl Plan {
     /// falls in, less what the period's start left out (a first part period) and never more than
     /// the asset is in use for in it (the part period at the end of the plan).
     pub fn leaving_amount(&self, amount: Decimal, end: NaiveDate, previous: Option<NaiveDate>, on: NaiveDate) -> Decimal {
-        let u = match self.convention {
+        let u = match self.convention() {
             Convention::Mid(u) if !self.by_hand() => u,
             _ => return partial(amount, self.period_start(end, previous), end, on, self.precision),
         };
@@ -327,6 +343,7 @@ mod tests {
             opening_booked: 0,
             salvage: Decimal::ZERO,
             precision: 2,
+            table: vec![],
         }
     }
 
@@ -557,6 +574,40 @@ mod tests {
         assert!(p.slots().is_empty());
         assert_eq!(p.period_start(d(2025, 1, 31), None), d(2024, 12, 31), "a usage row is cut by days from the day it came into use");
         assert_eq!(p.leaving_amount(n("100"), d(2025, 1, 31), None, d(2025, 1, 16)), partial(n("100"), d(2024, 12, 31), d(2025, 1, 31), d(2025, 1, 16), 2));
+    }
+
+    fn table(periods: &[&str]) -> Plan {
+        let p = plan(Method::Table, periods.len() as u32, 12, d(2020, 3, 10), d(2020, 12, 31));
+        Plan { table: periods.iter().map(|x| n(x)).collect(), ..p }
+    }
+
+    #[test]
+    fn a_table_gives_each_year_its_percent() {
+        let p = table(&["20", "32", "19.2", "11.52", "11.52", "5.76"]);
+        assert_eq!(amounts(&p, "10000"), ["2000.00", "3200.00", "1920.00", "1152.00", "1152.00", "576.00"]);
+        let odd = table(&["33.33", "44.45", "14.81", "7.41"]);
+        assert_eq!(amounts(&odd, "1000"), ["333.30", "444.50", "148.10", "74.10"]);
+        assert_eq!(amounts(&odd, "1000.01").iter().map(|a| n(a)).sum::<Decimal>(), n("1000.01"), "the last row takes the rounding");
+    }
+
+    #[test]
+    fn a_table_replans_by_the_percents_left() {
+        let p = table(&["20", "32", "19.2", "11.52", "11.52", "5.76"]);
+        let left: Vec<Slot> = p.slots().into_iter().skip(2).collect();
+        // 4,000 left over 19.2, 11.52, 11.52 and 5.76 (48 in all).
+        let rows: Vec<String> = p.amounts(&left, n("4000")).iter().map(|(_, a)| a.to_string()).collect();
+        assert_eq!(rows, ["1600.00", "960.00", "960.00", "480.00"]);
+    }
+
+    #[test]
+    fn a_table_ignores_the_start_convention() {
+        let base = table(&["20", "32", "19.2", "11.52", "11.52", "5.76"]);
+        for convention in [Convention::ProRataDays, Convention::Mid(12), Convention::Mid(1)] {
+            let p = Plan { convention, ..base.clone() };
+            assert_eq!(p.first_share(), Decimal::ONE, "{convention:?}");
+            assert_eq!(p.slots().len(), 6, "no extra period: the table has its own");
+            assert_eq!(p.period_start(d(2020, 12, 31), None), d(2019, 12, 31), "{convention:?}");
+        }
     }
 
     #[test]
